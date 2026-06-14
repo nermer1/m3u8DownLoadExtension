@@ -149,12 +149,12 @@ function updateBadge(tabId) {
 }
 
 // Clear streams when the tab reloads or closes
-chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
-  if (changeInfo.status === 'loading') {
-    delete detectedStreams[tabId];
-    updateBadge(tabId);
-  }
-});
+// chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
+//   if (changeInfo.status === 'loading') {
+//     delete detectedStreams[tabId];
+//     updateBadge(tabId);
+//   }
+// });
 
 chrome.tabs.onRemoved.addListener((tabId) => {
   delete detectedStreams[tabId];
