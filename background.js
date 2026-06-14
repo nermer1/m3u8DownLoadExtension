@@ -65,24 +65,7 @@ chrome.webRequest.onBeforeRequest.addListener(
           detectedStreams[tabId] = { m3u8: {}, ts: {} };
         }
         
-        // If it's a TS segment, discard it if there is already an M3U8 playlist on the same host,
-        // or if we already have a TS stream from the same folder.
-        if (streamType === 'ts') {
-          const hasM3u8OnHost = Object.values(detectedStreams[tabId].m3u8).some(mUrl => {
-            try {
-              return new URL(mUrl).host === urlObj.host;
-            } catch(e) { return false; }
-          });
-          if (hasM3u8OnHost) return;
-
-          const basePath = getUrlBasePath(url);
-          const alreadyHasTsInFolder = Object.values(detectedStreams[tabId].ts).some(tUrl => {
-            return getUrlBasePath(tUrl) === basePath;
-          });
-          if (alreadyHasTsInFolder) return;
-        }
-
-        const cleanedUrl = cleanUrlForDeduplication(url);
+        const cleanedUrl = url;
         const isNew = !detectedStreams[tabId][streamType][cleanedUrl];
         
         // Always store/overwrite the URL to keep dynamic token fresh!
@@ -125,26 +108,8 @@ chrome.webRequest.onHeadersReceived.addListener(
         if (!detectedStreams[tabId]) {
           detectedStreams[tabId] = { m3u8: {}, ts: {} };
         }
-        
-        // If it's a TS segment, discard it if there is already an M3U8 playlist on the same host,
-        // or if we already have a TS stream from the same folder.
-        if (streamType === 'ts') {
-          const urlObj = new URL(url);
-          const hasM3u8OnHost = Object.values(detectedStreams[tabId].m3u8).some(mUrl => {
-            try {
-              return new URL(mUrl).host === urlObj.host;
-            } catch(e) { return false; }
-          });
-          if (hasM3u8OnHost) return;
 
-          const basePath = getUrlBasePath(url);
-          const alreadyHasTsInFolder = Object.values(detectedStreams[tabId].ts).some(tUrl => {
-            return getUrlBasePath(tUrl) === basePath;
-          });
-          if (alreadyHasTsInFolder) return;
-        }
-
-        const cleanedUrl = cleanUrlForDeduplication(url);
+        const cleanedUrl = url;
         const isNew = !detectedStreams[tabId][streamType][cleanedUrl];
         
         // Always store/overwrite the URL to keep dynamic token fresh!

@@ -108,7 +108,7 @@ document.addEventListener('DOMContentLoaded', async () => {
           const key = group.groupKey;
           if (!streamMetadata[key]) {
             fetchHlsMetadata(key, url).then(() => {
-              const cardId = btoa(group.groupKey).replace(/=/g, '').substring(0, 32);
+              const cardId = btoa(unescape(encodeURIComponent(group.groupKey))).replace(/=/g, '').substring(0, 32);
               const selectEl = document.querySelector(`[data-url="${cardId}"] .card-resolution-select`);
               const durationEl = document.querySelector(`[data-url="${cardId}"] .card-thumb-badge`);
               
@@ -294,77 +294,28 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 
   function groupStreams(m3u8List, tsList) {
-    const groups = {};
+    const groupList = [];
 
     m3u8List.forEach(url => {
-      const groupKey = getUrlGroupKey(url);
       const label = extractLabelFromUrl(url);
-      const guessedRes = guessResolutionFromUrl(url);
-
-      if (!groups[groupKey]) {
-        groups[groupKey] = {
-          type: 'm3u8',
-          groupKey,
-          mainUrl: url,
-          urls: { [label]: url },
-          hasMaster: false,
-          labelCount: 1
-        };
-      } else {
-        // Update query string of existing group elements to keep token fresh
-        try {
-          const urlObj = new URL(url);
-          if (urlObj.search) {
-            const mainObj = new URL(groups[groupKey].mainUrl);
-            mainObj.search = urlObj.search;
-            groups[groupKey].mainUrl = mainObj.href;
-
-            // Also update query parameters of already cached sub-resolution URLs
-            Object.keys(groups[groupKey].urls).forEach(lbl => {
-              const resUrlObj = new URL(groups[groupKey].urls[lbl]);
-              resUrlObj.search = urlObj.search;
-              groups[groupKey].urls[lbl] = resUrlObj.href;
-            });
-          }
-        } catch(e) {}
-        
-        // Add to urls if not exactly matched
-        // Add to urls if not exactly matched
-        if (!Object.values(groups[groupKey].urls).includes(url)) {
-          groups[groupKey].urls[label] = url;
-        }
-      }
-
-      const uLower = url.toLowerCase();
-      const isMaster = (uLower.includes('master') || uLower.includes('playlist')) && 
-                       !uLower.includes('chunklist') && !uLower.includes('track-') && !uLower.includes('index_');
-
-      if (isMaster) {
-        groups[groupKey].hasMaster = true;
-        groups[groupKey].mainUrl = url;
-      } else if (!groups[groupKey].hasMaster && guessedRes) {
-        const currentGuessed = guessResolutionFromUrl(groups[groupKey].mainUrl);
-        if (!currentGuessed || (parseInt(guessedRes) > parseInt(currentGuessed))) {
-          groups[groupKey].mainUrl = url;
-        }
-      }
+      groupList.push({
+        type: 'm3u8',
+        groupKey: url,
+        mainUrl: url,
+        urls: { [label]: url },
+        hasMaster: false
+      });
     });
 
-    const groupList = Object.values(groups);
-
-    // Group TS streams ONLY if we don't have any HLS playlists!
-    if (m3u8List.length === 0) {
-      const filteredTs = filterTsStreams(tsList, m3u8List);
-      filteredTs.forEach(url => {
-        groupList.push({
-          type: 'ts',
-          groupKey: url,
-          mainUrl: url,
-          urls: { 'best': url },
-          hasMaster: false
-        });
+    tsList.forEach(url => {
+      groupList.push({
+        type: 'ts',
+        groupKey: url,
+        mainUrl: url,
+        urls: { 'best': url },
+        hasMaster: false
       });
-    }
+    });
 
     return groupList;
   }
@@ -383,7 +334,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // Create stream card element
   function createStreamCard(group) {
-    const cardId = btoa(group.groupKey).replace(/=/g, '').substring(0, 32);
+    const cardId = btoa(unescape(encodeURIComponent(group.groupKey))).replace(/=/g, '').substring(0, 32);
     
     const getFreshGroup = () => {
       return currentGroups.find(g => g.groupKey === group.groupKey) || group;
