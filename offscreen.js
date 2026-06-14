@@ -97,7 +97,16 @@ async function startTask(taskId, url, title, type, resolution) {
       const lastSlash = targetUrl.lastIndexOf('/');
       const basePath = targetUrl.substring(0, lastSlash + 1);
       const filename = targetUrl.substring(lastSlash + 1);
-      const numMatch = filename.match(/(\d+)(?=[^\d]*$)/);
+      
+      let pathPart = filename;
+      let queryPart = '';
+      const qIndex = filename.indexOf('?');
+      if (qIndex !== -1) {
+        pathPart = filename.substring(0, qIndex);
+        queryPart = filename.substring(qIndex);
+      }
+
+      const numMatch = pathPart.match(/(\d+)(?=[^\d]*$)/);
 
       if (!numMatch) {
         // Single TS file
@@ -107,15 +116,22 @@ async function startTask(taskId, url, title, type, resolution) {
       } else {
         // Set up sequence task
         task.isSequence = true;
-        task.seqPrefix = filename.substring(0, numMatch.index);
+        task.seqPrefix = pathPart.substring(0, numMatch.index);
         task.seqStartVal = parseInt(numMatch[1], 10);
         task.seqPadding = numMatch[1].length;
-        task.seqSuffix = filename.substring(numMatch.index + numMatch[1].length);
+        task.seqSuffix = pathPart.substring(numMatch.index + numMatch[1].length);
+        task.seqQuery = queryPart;
         task.seqBasePath = basePath;
         task.nextIndexToSpawn = 0;
         task.endIndex = -1;
         task.downloadedBuffersMap = {};
         task.totalSegments = 0;
+
+        // Detect if sequence is fMP4/M4S based on URL suffix or path
+        const checkUrl = targetUrl.toLowerCase();
+        if (checkUrl.includes('.m4s') || checkUrl.includes('.mp4') || checkUrl.includes('.m4a') || checkUrl.includes('.m4v') || checkUrl.includes('/m4s/') || checkUrl.includes('/mp4/')) {
+          task.isFmp4 = true;
+        }
 
         // Probe starting value (try starting from 0 or 1 if startVal > 1)
         if (task.seqStartVal > 1) {
@@ -154,7 +170,7 @@ async function startTask(taskId, url, title, type, resolution) {
 function getSequenceUrl(task, idx) {
   const val = task.seqStartVal + idx;
   const valStr = String(val < 0 ? 0 : val).padStart(task.seqPadding, '0');
-  return task.seqBasePath + task.seqPrefix + valStr + task.seqSuffix;
+  return task.seqBasePath + task.seqPrefix + valStr + task.seqSuffix + (task.seqQuery || '');
 }
 
 async function urlExists(url) {
@@ -436,6 +452,14 @@ async function downloadSequenceWorker(task) {
           throw new Error(`HTTP ${response.status}`);
         }
 
+        const contentType = response.headers.get('content-type');
+        if (contentType) {
+          const ct = contentType.toLowerCase();
+          if (ct.includes('video/iso.segment') || ct.includes('video/mp4') || ct.includes('audio/mp4') || ct.includes('video/x-m4s') || ct.includes('dash')) {
+            task.isFmp4 = true;
+          }
+        }
+
         const reader = response.body.getReader();
         const chunks = [];
         let receivedLength = 0;
@@ -500,6 +524,19 @@ async function fetchSegment(task, url, signal, key = null, iv = null) {
   const response = await fetch(url, { signal });
   if (!response.ok) {
     throw new Error(`HTTP ${response.status}`);
+  }
+
+  const contentType = response.headers.get('content-type');
+  if (contentType) {
+    const ct = contentType.toLowerCase();
+    if (ct.includes('video/iso.segment') || ct.includes('video/mp4') || ct.includes('audio/mp4') || ct.includes('video/x-m4s') || ct.includes('dash')) {
+      task.isFmp4 = true;
+    }
+  } else {
+    const u = url.toLowerCase();
+    if (u.includes('.m4s') || u.includes('.mp4') || u.includes('.m4a') || u.includes('.m4v') || u.includes('/m4s/') || u.includes('/mp4/')) {
+      task.isFmp4 = true;
+    }
   }
 
   const reader = response.body.getReader();

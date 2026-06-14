@@ -54,9 +54,9 @@ chrome.webRequest.onBeforeRequest.addListener(
       const search = urlObj.search.toLowerCase();
 
       let streamType = null;
-      if (pathname.includes('.m3u8') || search.includes('.m3u8') || pathname.includes('/m3u8')) {
+      if (pathname.includes('.m3u8') || search.includes('.m3u8') || pathname.includes('/m3u8') || pathname.includes('.mpd') || search.includes('.mpd') || pathname.includes('/mpd/')) {
         streamType = 'm3u8';
-      } else if (pathname.includes('.ts') || search.includes('.ts') || pathname.includes('/ts/') || pathname.includes('/segment-')) {
+      } else if (pathname.includes('.ts') || search.includes('.ts') || pathname.includes('/ts/') || pathname.includes('/segment-') || pathname.includes('.m4s') || search.includes('.m4s') || pathname.includes('/m4s/')) {
         streamType = 'ts';
       }
 
@@ -98,9 +98,9 @@ chrome.webRequest.onHeadersReceived.addListener(
       
       const contentType = contentTypeHeader.value.toLowerCase();
       let streamType = null;
-      if (contentType.includes('mpegurl') || contentType.includes('m3u8')) {
+      if (contentType.includes('mpegurl') || contentType.includes('m3u8') || contentType.includes('dash+xml') || contentType.includes('mpd')) {
         streamType = 'm3u8';
-      } else if (contentType.includes('video/mp2t')) {
+      } else if (contentType.includes('video/mp2t') || contentType.includes('video/iso.segment') || contentType.includes('video/mp4')) {
         streamType = 'ts';
       }
 
