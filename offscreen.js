@@ -634,6 +634,7 @@ function mergeAndSaveTask(task) {
   chrome.runtime.sendMessage({
     action: 'SAVE_COMPLETED_TASK',
     filename: filename,
+    blobUrl: blobUrl, // lets the background find Chrome's download id (folder / play buttons)
     taskId: task.id,
     taskUrl: task.url,
     taskTitle: task.title

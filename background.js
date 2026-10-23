@@ -441,9 +441,13 @@ function handleMessage(message, sendResponse) {
     const task = activeDownloads[message.taskId] || message.task || { id: message.taskId, url: message.taskUrl, title: message.taskTitle };
     if (task) {
       task.state = 'completed';
-      saveCompletedTaskToStorage(task, message.filename);
       delete activeDownloads[message.taskId];
       persist();
+      // The merged file is saved by the offscreen page itself: look up its download id by the blob URL
+      findDownloadIdByUrl(message.blobUrl).then((downloadId) => {
+        if (downloadId != null) task.downloadId = downloadId;
+        saveCompletedTaskToStorage(task, message.filename);
+      });
     }
     chrome.runtime.sendMessage({ action: 'DOWNLOAD_SUCCESS_CLEANUP', taskId: message.taskId }, () => {
       if (chrome.runtime.lastError) { /* ignore */ }
@@ -601,6 +605,17 @@ function getCleanFilename(title, defaultExt = '.mp4') {
     clean += defaultExt;
   }
   return clean;
+}
+
+// The download item appears shortly after the save starts: retry for a few seconds
+async function findDownloadIdByUrl(url) {
+  if (!url) return null;
+  for (let i = 0; i < 10; i++) {
+    const [item] = await chrome.downloads.search({ url, orderBy: ['-startTime'], limit: 1 });
+    if (item) return item.id;
+    await new Promise(r => setTimeout(r, 300));
+  }
+  return null;
 }
 
 function broadcastProgressToPopup(task) {

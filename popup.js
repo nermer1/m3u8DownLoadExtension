@@ -863,11 +863,41 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // 완료 (Completed downloads history)
   async function loadCompletedHistory() {
-    chrome.storage.local.get({ completedDownloads: [] }, (res) => {
+    chrome.storage.local.get({ completedDownloads: [] }, async (res) => {
       const list = res.completedDownloads || [];
       renderCompletedList(list);
+      // Fill in missing/stale download ids now, so the buttons can open the file directly on click
+      // (chrome.downloads.open needs the click itself, not a click followed by an async search)
+      if (await repairDownloadIds(list)) chrome.storage.local.set({ completedDownloads: list });
     });
   }
+
+  // Older entries (merged HLS saved without an id) or ids Chrome no longer knows: look up by file name
+  async function repairDownloadIds(list) {
+    let changed = false;
+    for (const item of list) {
+      if (item.downloadId != null) {
+        const [found] = await chrome.downloads.search({ id: item.downloadId });
+        if (found) continue;
+      }
+      if (!item.filename) continue;
+      const escaped = item.filename.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const [match] = await chrome.downloads.search({ filenameRegex: '(^|[\\\\/])' + escaped + '$', orderBy: ['-startTime'], limit: 1 });
+      const id = match ? match.id : null;
+      if (id !== (item.downloadId ?? null)) {
+        item.downloadId = id;
+        changed = true;
+      }
+    }
+    return changed;
+  }
+
+  // History is written by the background after the file is saved: redraw when it changes
+  chrome.storage.onChanged.addListener((changes, area) => {
+    if (area === 'local' && changes.completedDownloads) {
+      renderCompletedList(changes.completedDownloads.newValue || []);
+    }
+  });
 
   function renderCompletedList(list) {
     if (list.length === 0) {
@@ -913,7 +943,9 @@ document.addEventListener('DOMContentLoaded', async () => {
       btnFolder.title = '폴더 열기';
       btnFolder.innerHTML = `<svg viewBox="0 0 24 24"><path d="M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></svg>`;
       btnFolder.addEventListener('click', () => {
-        chrome.downloads.show(item.downloadId);
+        // Unknown file (moved / removed from Chrome's list): open the downloads folder instead
+        if (item.downloadId != null) chrome.downloads.show(item.downloadId);
+        else chrome.downloads.showDefaultFolder();
       });
       buttons.appendChild(btnFolder);
 
@@ -923,6 +955,10 @@ document.addEventListener('DOMContentLoaded', async () => {
       btnPlay.title = '동영상 재생';
       btnPlay.innerHTML = `<svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>재생`;
       btnPlay.addEventListener('click', () => {
+        if (item.downloadId == null) {
+          alert('파일을 찾을 수 없습니다. 이동했거나 삭제된 파일일 수 있습니다.');
+          return;
+        }
         chrome.downloads.open(item.downloadId);
       });
       buttons.appendChild(btnPlay);
