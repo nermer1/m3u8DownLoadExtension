@@ -1,7 +1,7 @@
 importScripts('streams.js');
 
-const detectedStreams = {}; // { [tabId]: { m3u8: { [url]: url }, ts: { [url]: url } } } oldest first
-const streamInfo = {}; // { [m3u8 url]: parsePlaylist() result }
+const detectedStreams = {}; // { [tabId]: { m3u8: { [url]: url }, ts: {...}, file: {...} } } oldest first
+const streamInfo = {}; // { [m3u8 url]: parsePlaylist() result, [file url]: { kind: 'file', ext, size } }
 const activeDownloads = {};
 let creatingOffscreenPromise = null;
 
@@ -23,13 +23,18 @@ function persist() {
 }
 
 // Remember a captured stream URL for the tab (newest last) and analyze new playlists
-function recordStream(tabId, url, streamType) {
+//   fileInfo: { ext, size } for direct video files
+function recordStream(tabId, url, streamType, fileInfo) {
   if (isBlockedUrl(url)) return;
   if (!detectedStreams[tabId]) {
-    detectedStreams[tabId] = { m3u8: {}, ts: {} };
+    detectedStreams[tabId] = { m3u8: {}, ts: {}, file: {} };
   }
-  const bucket = detectedStreams[tabId][streamType];
+  const bucket = detectedStreams[tabId][streamType] || (detectedStreams[tabId][streamType] = {});
   const isNew = !bucket[url];
+  if (fileInfo) {
+    const prev = streamInfo[url];
+    streamInfo[url] = { kind: 'file', ext: fileInfo.ext, size: Math.max(fileInfo.size || 0, (prev && prev.size) || 0) };
+  }
 
   // Re-insert so the latest request (fresh token) is last
   delete bucket[url];
@@ -79,11 +84,30 @@ function notifyStreamsUpdated(tabId) {
 // List shown in the popup: one entry per video (see collapseStreams), or every captured URL when raw
 function streamsForTab(tabId, raw) {
   const streams = detectedStreams[tabId];
-  if (!streams) return { m3u8: [], ts: [], meta: {} };
+  if (!streams) return { m3u8: [], ts: [], file: [], meta: {} };
   const m3u8 = Object.values(streams.m3u8);
   const ts = Object.values(streams.ts);
-  if (raw) return { m3u8, ts, meta: {} };
-  return collapseStreams(m3u8, ts, streamInfo);
+  const file = Object.values(streams.file || {});
+  if (raw) return { m3u8, ts, file, meta: {} };
+  return collapseStreams(m3u8, ts, streamInfo, file);
+}
+
+// Request types a <video src="...mp4"> or an opened video tab uses. Adaptive players fetch
+// fragments with XHR/fetch, so those only count when the response is a whole large file.
+const FILE_REQUEST_TYPES = new Set(['media', 'main_frame', 'sub_frame', 'object', 'other']);
+const MIN_XHR_FILE_SIZE = 20 * 1024 * 1024;
+
+function detectVideoFile(details, contentType) {
+  const ct = contentType.toLowerCase();
+  const isVideoType = ct.startsWith('video/') && !ct.includes('mp2t');
+  const isBinary = ct.includes('octet-stream') || ct === '';
+  const ext = videoFileExt(details.url, ct);
+  if (!ext || !(isVideoType || isBinary)) return null;
+  if (/\.m4s$/i.test(pathKeyOf(details.url))) return null;
+
+  const size = totalSizeOf(details.responseHeaders, details.statusCode);
+  if (!FILE_REQUEST_TYPES.has(details.type) && size < MIN_XHR_FILE_SIZE) return null;
+  return { ext, size };
 }
 
 // Listen for network requests to detect HLS playlist (.m3u8) or TS segment (.ts)
@@ -124,9 +148,7 @@ chrome.webRequest.onHeadersReceived.addListener(
 
     try {
       const contentTypeHeader = responseHeaders.find(h => h.name.toLowerCase() === 'content-type');
-      if (!contentTypeHeader) return;
-      
-      const contentType = contentTypeHeader.value.toLowerCase();
+      const contentType = contentTypeHeader ? contentTypeHeader.value.toLowerCase() : '';
       let streamType = null;
       if (contentType.includes('mpegurl') || contentType.includes('m3u8')) {
         streamType = 'm3u8';
@@ -136,6 +158,12 @@ chrome.webRequest.onHeadersReceived.addListener(
 
       if (streamType) {
         ready.then(() => recordStream(tabId, url, streamType));
+        return;
+      }
+
+      const file = detectVideoFile(details, contentType);
+      if (file) {
+        ready.then(() => recordStream(tabId, url, 'file', file));
       }
     } catch (e) {
       console.error("Error in onHeadersReceived sniffer: ", e);
@@ -152,7 +180,7 @@ function updateBadge(tabId) {
     return;
   }
   const shown = streamsForTab(tabId, false);
-  const total = shown.m3u8.length + shown.ts.length;
+  const total = shown.m3u8.length + shown.ts.length + shown.file.length;
   chrome.action.setBadgeText({
     text: total > 0 ? total.toString() : '',
     tabId
@@ -182,7 +210,10 @@ chrome.tabs.onRemoved.addListener((tabId) => {
 // Drop parsed playlists no tab refers to any more
 function pruneStreamInfo() {
   const alive = new Set();
-  Object.values(detectedStreams).forEach(s => Object.keys(s.m3u8).forEach(u => alive.add(u)));
+  Object.values(detectedStreams).forEach(s => {
+    Object.keys(s.m3u8).forEach(u => alive.add(u));
+    Object.keys(s.file || {}).forEach(u => alive.add(u));
+  });
   Object.keys(streamInfo).forEach(u => {
     if (!alive.has(u)) delete streamInfo[u];
   });
@@ -271,17 +302,25 @@ function handleMessage(message, sendResponse) {
       sendResponse({ success: false, error: 'blocked' });
       return;
     }
-    recordStream(tabId, url, type === 'ts' ? 'ts' : 'm3u8');
+    if (type === 'file') {
+      recordStream(tabId, url, 'file', { ext: videoFileExt(url) || 'mp4', size: 0 });
+    } else {
+      recordStream(tabId, url, type === 'ts' ? 'ts' : 'm3u8');
+    }
     sendResponse({ success: true });
   }
 
   else if (action === 'getActiveDownloads') {
-    // Tasks live in the offscreen document; without it nothing can be running (e.g. it crashed)
-    hasOffscreenDocument().then((alive) => {
-      if (!alive && Object.keys(activeDownloads).length) {
-        Object.keys(activeDownloads).forEach(id => delete activeDownloads[id]);
-        persist();
+    // HLS/TS tasks live in the offscreen document; without it they can't be running (e.g. it crashed).
+    // Video files are downloaded by Chrome itself, so they are refreshed from chrome.downloads.
+    hasOffscreenDocument().then(async (alive) => {
+      if (!alive) {
+        Object.values(activeDownloads).forEach(t => {
+          if (t.type !== 'file') delete activeDownloads[t.id];
+        });
       }
+      await refreshFileTasks();
+      persist();
       sendResponse({ activeDownloads });
     });
   }
@@ -289,6 +328,16 @@ function handleMessage(message, sendResponse) {
   else if (action === 'startDownload') {
     if (isBlockedUrl(url)) {
       sendResponse({ success: false, error: 'blocked' });
+      return;
+    }
+    if (type === 'file') {
+      const existing = activeDownloads[taskId];
+      if (existing && existing.state === 'paused' && existing.downloadId != null) {
+        chrome.downloads.resume(existing.downloadId, () => void chrome.runtime.lastError);
+      } else {
+        startFileDownload(taskId, url, title);
+      }
+      sendResponse({ success: true });
       return;
     }
     // The popup already sends the newest captured URL (fresh token) of the entry
@@ -325,24 +374,34 @@ function handleMessage(message, sendResponse) {
   } 
   
   else if (action === 'pauseDownload') {
-    if (activeDownloads[taskId]) {
-      activeDownloads[taskId].state = 'paused';
+    const task = activeDownloads[taskId];
+    if (task) {
+      task.state = 'paused';
       persist();
     }
-    chrome.runtime.sendMessage({ action: 'PAUSE_DOWNLOAD', taskId }, () => {
-      if (chrome.runtime.lastError) { /* ignore */ }
-    });
+    if (task && task.type === 'file') {
+      if (task.downloadId != null) chrome.downloads.pause(task.downloadId, () => void chrome.runtime.lastError);
+    } else {
+      chrome.runtime.sendMessage({ action: 'PAUSE_DOWNLOAD', taskId }, () => {
+        if (chrome.runtime.lastError) { /* ignore */ }
+      });
+    }
     sendResponse({ success: true });
-  } 
-  
+  }
+
   else if (action === 'cancelDownload') {
+    const task = activeDownloads[taskId];
     delete activeDownloads[taskId];
     persist();
-    chrome.runtime.sendMessage({ action: 'CANCEL_DOWNLOAD', taskId }, () => {
-      if (chrome.runtime.lastError) { /* ignore */ }
-    });
+    if (task && task.type === 'file') {
+      if (task.downloadId != null) chrome.downloads.cancel(task.downloadId, () => void chrome.runtime.lastError);
+    } else {
+      chrome.runtime.sendMessage({ action: 'CANCEL_DOWNLOAD', taskId }, () => {
+        if (chrome.runtime.lastError) { /* ignore */ }
+      });
+    }
     sendResponse({ success: true });
-  } 
+  }
   
   else if (action === 'TRIGGER_DOWNLOAD_FROM_BG') {
     chrome.downloads.download({
@@ -432,6 +491,116 @@ function handleMessage(message, sendResponse) {
     chrome.offscreen.closeDocument().catch(() => {});
     sendResponse({ success: true });
   }
+}
+
+// ---- Direct video files: downloaded by Chrome (no merging, no memory use), progress read back from chrome.downloads ----
+
+function startFileDownload(taskId, url, title) {
+  const info = streamInfo[url] || {};
+  const ext = '.' + (info.ext || videoFileExt(url) || 'mp4');
+  activeDownloads[taskId] = {
+    id: taskId,
+    url,
+    title,
+    type: 'file',
+    resolution: 'best',
+    progress: 0,
+    speed: 0,
+    eta: '--:--',
+    state: 'downloading',
+    downloadedCount: 0,
+    totalSegments: 0,
+    bytesReceived: 0,
+    totalBytes: info.size || 0
+  };
+  persist();
+
+  chrome.downloads.download({ url, filename: getCleanFilename(title, ext), saveAs: false }, (downloadId) => {
+    const task = activeDownloads[taskId];
+    if (!task) return;
+    if (chrome.runtime.lastError || downloadId === undefined) {
+      task.state = 'error';
+      task.errorMsg = `다운로드 시작 실패: ${chrome.runtime.lastError ? chrome.runtime.lastError.message : ''}`;
+      delete activeDownloads[taskId];
+      persist();
+      broadcastProgressToPopup(task);
+      return;
+    }
+    task.downloadId = downloadId;
+    persist();
+  });
+}
+
+// Copy Chrome's download progress into the file tasks (called when the popup asks)
+async function refreshFileTasks() {
+  const tasks = Object.values(activeDownloads).filter(t => t.type === 'file' && t.downloadId != null);
+  for (const task of tasks) {
+    const [item] = await chrome.downloads.search({ id: task.downloadId });
+    if (!item) {
+      delete activeDownloads[task.id];
+      continue;
+    }
+    const now = Date.now();
+    if (task.lastTime && now > task.lastTime) {
+      task.speed = Math.max(0, (item.bytesReceived - task.bytesReceived) / ((now - task.lastTime) / 1000)) / (1024 * 1024);
+    }
+    task.lastTime = now;
+    task.bytesReceived = item.bytesReceived;
+    task.totalBytes = item.totalBytes > 0 ? item.totalBytes : task.totalBytes;
+    task.progress = task.totalBytes > 0 ? (item.bytesReceived / task.totalBytes) * 100 : 0;
+    if (item.paused) task.state = 'paused';
+    else if (item.state === 'in_progress') task.state = 'downloading';
+    task.eta = '--:--';
+    if (item.estimatedEndTime && !item.paused) {
+      const sec = Math.max(0, Math.round((new Date(item.estimatedEndTime).getTime() - now) / 1000));
+      task.eta = `${String(Math.floor(sec / 60)).padStart(2, '0')}:${String(sec % 60).padStart(2, '0')}`;
+    }
+  }
+}
+
+chrome.downloads.onChanged.addListener((delta) => {
+  ready.then(() => {
+    const task = Object.values(activeDownloads).find(t => t.type === 'file' && t.downloadId === delta.id);
+    if (!task) return;
+
+    if (delta.state && delta.state.current === 'complete') {
+      delete activeDownloads[task.id];
+      persist();
+      chrome.downloads.search({ id: delta.id }, ([item]) => {
+        const filename = item && item.filename ? item.filename.split(/[\\/]/).pop() : task.title;
+        saveCompletedTaskToStorage(task, filename);
+        // Tell the popup after the history is saved so its list includes this file
+        setTimeout(() => broadcastProgressToPopup({ ...task, state: 'completed', progress: 100 }), 100);
+      });
+    } else if (delta.state && delta.state.current === 'interrupted') {
+      delete activeDownloads[task.id];
+      persist();
+      if (delta.error && delta.error.current === 'USER_CANCELED') {
+        chrome.runtime.sendMessage({ action: 'DOWNLOAD_CANCELLED', taskId: task.id }, () => void chrome.runtime.lastError);
+      } else {
+        broadcastProgressToPopup({ ...task, state: 'error', errorMsg: `다운로드 실패: ${delta.error ? delta.error.current : ''}` });
+      }
+    } else if (delta.paused) {
+      task.state = delta.paused.current ? 'paused' : 'downloading';
+      persist();
+      broadcastProgressToPopup(task);
+    }
+  });
+});
+
+// Same rule as the offscreen merger
+function getCleanFilename(title, defaultExt = '.mp4') {
+  if (!title) return 'mediadown-video' + defaultExt;
+  // chrome.downloads also rejects control characters and names ending with a dot/space
+  let clean = title.replace(/[\\/:*?"<>|\x00-\x1f]/g, '_').trim();
+  if (clean.length > 120) {
+    clean = clean.substring(0, 120);
+  }
+  clean = clean.replace(/[. ]+$/, '') || 'mediadown-video';
+  if (!clean.endsWith(defaultExt)) {
+    clean += defaultExt;
+  }
+  return clean;
 }
 
 function broadcastProgressToPopup(task) {

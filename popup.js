@@ -60,6 +60,17 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
   });
 
+  // Video files are downloaded by Chrome: poll their progress while the popup is open
+  setInterval(() => {
+    if (!Object.values(activeDownloads).some(t => t && t.type === 'file')) return;
+    chrome.runtime.sendMessage({ action: 'getActiveDownloads' }, (response) => {
+      if (chrome.runtime.lastError || !response) return;
+      Object.values(response.activeDownloads || {}).forEach(t => {
+        if (t.type === 'file') updateProgressUI(t);
+      });
+    });
+  }, 1000);
+
   // Query active downloads from background
   async function getActiveDownloads() {
     return new Promise((resolve) => {
@@ -80,13 +91,13 @@ document.addEventListener('DOMContentLoaded', async () => {
         return;
       }
 
-      const { m3u8 = [], ts = [], meta = {} } = response || {};
-      // Duration / resolutions already parsed by the background
+      const { m3u8 = [], ts = [], file = [], meta = {} } = response || {};
+      // Duration / resolutions / file size already parsed by the background
       Object.keys(meta).forEach(u => { streamMetadata[u] = meta[u]; });
       const metaStr = JSON.stringify(meta);
 
       // Group streams
-      const newGroups = groupStreams(m3u8, ts);
+      const newGroups = groupStreams(m3u8, ts, file);
       
       // Calculate fingerprints to detect visual/structural changes
       const currentKeys = currentGroups.map(g => g.groupKey).sort().join(',');
@@ -323,8 +334,18 @@ document.addEventListener('DOMContentLoaded', async () => {
     return currentGroups.find(g => g.mainUrl === url || Object.values(g.urls).includes(url));
   }
 
-  function groupStreams(m3u8List, tsList) {
+  function groupStreams(m3u8List, tsList, fileList = []) {
     const groupList = [];
+
+    fileList.forEach(url => {
+      groupList.push({
+        type: 'file',
+        groupKey: url,
+        mainUrl: url,
+        urls: { 'best': url },
+        hasMaster: false
+      });
+    });
 
     m3u8List.forEach(url => {
       const label = extractLabelFromUrl(url);
@@ -501,8 +522,13 @@ document.addEventListener('DOMContentLoaded', async () => {
     durationBadge.style.display = 'none';
     
     const meta = streamMetadata[group.groupKey];
+    const isFile = group.type === 'file';
+    const fileExt = isFile ? ((meta && meta.ext) || 'mp4') : '';
     if (meta && meta.duration) {
       durationBadge.innerHTML = `<svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 14.5v-9l6 4.5-6 4.5z"/></svg>${meta.duration}`;
+      durationBadge.style.display = 'flex';
+    } else if (isFile && meta && meta.size) {
+      durationBadge.textContent = meta.size;
       durationBadge.style.display = 'flex';
     }
     thumbWrapper.appendChild(durationBadge);
@@ -518,7 +544,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     const typeBadge = document.createElement('span');
     typeBadge.className = 'card-type-badge';
-    typeBadge.textContent = group.type;
+    typeBadge.textContent = isFile ? fileExt : group.type;
     titleRow.appendChild(typeBadge);
 
     const titleLabel = document.createElement('span');
@@ -569,7 +595,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Format badge box (mock format like MP4 container)
     const formatBox = document.createElement('div');
     formatBox.className = 'card-format-box';
-    formatBox.textContent = 'MP4'; // User mockup has MP4 badge
+    formatBox.textContent = isFile ? fileExt.toUpperCase() : 'MP4'; // Merged streams are saved as MP4
     actionsRow.appendChild(formatBox);
 
     // Resolution dropdown
@@ -584,6 +610,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       opt.textContent = res;
       resSelect.appendChild(opt);
     });
+    if (isFile) resSelect.style.display = 'none'; // A single file has one resolution
     actionsRow.appendChild(resSelect);
 
     // Download Button
@@ -766,7 +793,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (progressFill) progressFill.style.width = `${task.progress}%`;
     
     if (statText) {
-      statText.textContent = `${task.downloadedCount} / ${task.totalSegments} 조각 | ${task.speed.toFixed(1)} MB/s (남음: ${task.eta})`;
+      const speed = `${(task.speed || 0).toFixed(1)} MB/s (남음: ${task.eta})`;
+      statText.textContent = task.type === 'file'
+        ? `${formatSize(task.bytesReceived) || '0 KB'} / ${formatSize(task.totalBytes) || '?'} | ${speed}`
+        : `${task.downloadedCount} / ${task.totalSegments} 조각 | ${speed}`;
     }
   }
 
@@ -812,7 +842,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
 
     let type = 'm3u8';
-    if (url.includes('.ts') || url.includes('/ts/')) {
+    if (videoFileExt(url)) {
+      type = 'file';
+    } else if (url.includes('.ts') || url.includes('/ts/')) {
       type = 'ts';
     }
 
