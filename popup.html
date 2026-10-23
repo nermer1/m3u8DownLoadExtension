@@ -39,7 +39,12 @@
       <section class="streams-section">
         <div class="section-header">
           <h2>감지된 미디어 스트림 <span id="total-count" class="badge">0</span></h2>
-          <button id="btn-clear" class="btn-text" title="감지 목록 비우기">감지 비우기</button>
+          <div class="section-tools">
+            <label class="raw-toggle" title="같은 영상으로 묶지 않고 감지된 주소를 모두 표시">
+              <input type="checkbox" id="raw-toggle"> 모든 주소
+            </label>
+            <button id="btn-clear" class="btn-text" title="감지 목록 비우기">감지 비우기</button>
+          </div>
         </div>
         
         <div id="streams-list" class="streams-list">
@@ -69,10 +74,11 @@
         <button id="btn-hide-history" class="btn-text-link">숨기기</button>
         <button id="btn-clear-history" class="btn-text-link">모두 비우기</button>
       </div>
-      <p>MediaDown v1.1 • Chrome MV3</p>
+      <p>MediaDown v1.2 • Chrome MV3</p>
     </footer>
   </div>
   <script src="hls.min.js"></script>
+  <script src="streams.js"></script>
   <script src="popup.js"></script>
 </body>
 </html>

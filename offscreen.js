@@ -231,8 +231,15 @@ async function fetchAndParseM3u8Recursively(task, url, depth = 0) {
 
     if (line.startsWith('#EXT-X-MEDIA-SEQUENCE:')) {
       mediaSequence = parseInt(line.split(':')[1]);
-    } else if (line.startsWith('#EXT-X-KEY:')) {
-      if (line.includes('METHOD=AES-128')) {
+    } else if (line.startsWith('#EXT-X-KEY:') || line.startsWith('#EXT-X-SESSION-KEY:')) {
+      // DRM (SAMPLE-AES, Widevine/PlayReady/FairPlay key formats) is not supported
+      const method = (line.match(/METHOD=([A-Z0-9-]+)/) || [])[1] || '';
+      const keyFormat = (line.match(/KEYFORMAT="([^"]+)"/) || [])[1] || 'identity';
+      if ((method !== 'NONE' && method !== 'AES-128') || keyFormat !== 'identity') {
+        throw new Error('DRM 보호 영상은 지원하지 않습니다.');
+      }
+      if (line.startsWith('#EXT-X-SESSION-KEY:')) continue;
+      if (method === 'AES-128') {
         const uriMatch = line.match(/URI="([^"]+)"/);
         const ivMatch = line.match(/IV=0x([0-9a-fA-F]+)/i);
         if (uriMatch) {
@@ -664,6 +671,11 @@ function broadcastProgress(task) {
   chrome.runtime.sendMessage({
     action: 'DOWNLOAD_PROGRESS',
     taskId: task.id,
+    // Lets the background rebuild the task if its worker was restarted
+    url: task.url,
+    title: task.title,
+    type: task.type,
+    resolution: task.resolution,
     state: task.state,
     downloadedCount: task.downloadedCount,
     totalSegments: task.totalSegments,
@@ -723,7 +735,7 @@ function stopSpeedInterval(task) {
 
 // Close offscreen document if no active tasks are running
 function checkAndCloseOffscreen() {
-  const running = Object.values(activeTasks).some(t => t.state === 'downloading' || t.state === 'parsing');
+  const running = Object.values(activeTasks).some(t => t.state === 'downloading' || t.state === 'parsing' || t.state === 'paused');
   if (!running) {
     // Tell background script that we can close
     chrome.runtime.sendMessage({ action: 'OFFSCREEN_IDLE' }, () => {

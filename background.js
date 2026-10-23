@@ -1,45 +1,89 @@
-const detectedStreams = {};
+importScripts('streams.js');
+
+const detectedStreams = {}; // { [tabId]: { m3u8: { [url]: url }, ts: { [url]: url } } } oldest first
+const streamInfo = {}; // { [m3u8 url]: parsePlaylist() result }
 const activeDownloads = {};
 let creatingOffscreenPromise = null;
 
-function getUrlBasePath(url) {
-  try {
-    const urlObj = new URL(url);
-    const lastSlash = urlObj.pathname.lastIndexOf('/');
-    if (lastSlash !== -1) {
-      return urlObj.host + urlObj.pathname.substring(0, lastSlash + 1);
-    }
-    return urlObj.host + urlObj.pathname;
-  } catch (e) {
-    return url;
-  }
+const MAX_URLS_PER_TYPE = 300;
+// The service worker is stopped after ~30s idle and loses globals.
+// Keep detected streams and download progress in storage.session and restore them on wake-up.
+const ready = chrome.storage.session.get(['detectedStreams', 'streamInfo', 'activeDownloads']).then((saved) => {
+  Object.assign(detectedStreams, saved.detectedStreams || {});
+  Object.assign(streamInfo, saved.streamInfo || {});
+  Object.assign(activeDownloads, saved.activeDownloads || {});
+}).catch(() => {});
+
+let persistTimer = null;
+function persist() {
+  clearTimeout(persistTimer);
+  persistTimer = setTimeout(() => {
+    chrome.storage.session.set({ detectedStreams, streamInfo, activeDownloads }).catch(() => {});
+  }, 300);
 }
 
-// Strip out dynamic timestamp or cache-buster parameters for strict deduplication
-function cleanUrlForDeduplication(url) {
-  try {
-    const urlObj = new URL(url);
-    const searchParams = new URLSearchParams(urlObj.search);
-    
-    // Remove dynamic timestamp/nonce query params
-    const paramsToRemove = ['_', 't', 'time', 'timestamp', 'cb', 'cachebuster', 'seq', 'segment', 'nonce', 'r', 'random', 'start', 'end'];
-    for (const param of paramsToRemove) {
-      searchParams.delete(param);
-    }
-    
-    // Remove purely numeric keys or values (timestamps/sequences)
-    const keys = Array.from(searchParams.keys());
-    for (const key of keys) {
-      if (/^\d+$/.test(key) || /^\d+$/.test(searchParams.get(key))) {
-        searchParams.delete(key);
-      }
-    }
-    
-    urlObj.search = searchParams.toString();
-    return urlObj.toString();
-  } catch (e) {
-    return url;
+// Remember a captured stream URL for the tab (newest last) and analyze new playlists
+function recordStream(tabId, url, streamType) {
+  if (isBlockedUrl(url)) return;
+  if (!detectedStreams[tabId]) {
+    detectedStreams[tabId] = { m3u8: {}, ts: {} };
   }
+  const bucket = detectedStreams[tabId][streamType];
+  const isNew = !bucket[url];
+
+  // Re-insert so the latest request (fresh token) is last
+  delete bucket[url];
+  bucket[url] = url;
+  const keys = Object.keys(bucket);
+  if (keys.length > MAX_URLS_PER_TYPE) {
+    keys.slice(0, keys.length - MAX_URLS_PER_TYPE).forEach(k => delete bucket[k]);
+  }
+  persist();
+
+  if (!isNew) return;
+  updateBadge(tabId);
+  notifyStreamsUpdated(tabId);
+  if (streamType === 'm3u8' && !streamInfo[url]) analyzePlaylist(tabId, url);
+}
+
+// Read the playlist once to know master/variant relations and content (used to collapse duplicates)
+function analyzePlaylist(tabId, url) {
+  fetchPlaylistText(url)
+    .then(text => {
+      const parsed = parsePlaylist(text, url);
+      if (!parsed) return;
+      streamInfo[url] = parsed;
+      persist();
+      updateBadge(tabId);
+      notifyStreamsUpdated(tabId);
+    })
+    .catch(() => { /* CORS/auth failures: grouped by path only */ });
+}
+
+function fetchPlaylistText(url) {
+  // Try without credentials first for public CDNs (wildcard CORS),
+  // then with the user's own cookies for sites the user is signed in to.
+  const get = (opts) => fetch(url, opts).then(res => {
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return res.text();
+  });
+  return get().catch(() => get({ credentials: 'include' }));
+}
+
+function notifyStreamsUpdated(tabId) {
+  chrome.runtime.sendMessage({ action: 'STREAMS_UPDATED', tabId }, () => {
+    if (chrome.runtime.lastError) { /* ignore */ }
+  });
+}
+
+// List shown in the popup: one entry per video (see collapseStreams), or every captured URL when raw
+function streamsForTab(tabId, raw) {
+  const streams = detectedStreams[tabId];
+  if (!streams) return { m3u8: [], ts: [], meta: {} };
+  const m3u8 = Object.values(streams.m3u8);
+  const ts = Object.values(streams.ts);
+  if (raw) return { m3u8, ts, meta: {} };
+  return collapseStreams(m3u8, ts, streamInfo);
 }
 
 // Listen for network requests to detect HLS playlist (.m3u8) or TS segment (.ts)
@@ -47,6 +91,7 @@ chrome.webRequest.onBeforeRequest.addListener(
   (details) => {
     const { url, tabId } = details;
     if (tabId < 0) return;
+    if (isBlockedUrl(details.initiator || '')) return; // requests made by YouTube pages
 
     try {
       const urlObj = new URL(url);
@@ -61,23 +106,7 @@ chrome.webRequest.onBeforeRequest.addListener(
       }
 
       if (streamType) {
-        if (!detectedStreams[tabId]) {
-          detectedStreams[tabId] = { m3u8: {}, ts: {} };
-        }
-        
-        const cleanedUrl = url;
-        const isNew = !detectedStreams[tabId][streamType][cleanedUrl];
-        
-        // Always store/overwrite the URL to keep dynamic token fresh!
-        detectedStreams[tabId][streamType][cleanedUrl] = url;
-        
-        if (isNew) {
-          updateBadge(tabId);
-          // Broadcast detected stream list update to popup if open
-          chrome.runtime.sendMessage({ action: 'STREAMS_UPDATED', tabId }, () => {
-            if (chrome.runtime.lastError) { /* ignore */ }
-          });
-        }
+        ready.then(() => recordStream(tabId, url, streamType));
       }
     } catch (e) {
       console.error("Error parsing URL in webRequest: ", e);
@@ -91,6 +120,7 @@ chrome.webRequest.onHeadersReceived.addListener(
   (details) => {
     const { url, tabId, responseHeaders } = details;
     if (tabId < 0) return;
+    if (isBlockedUrl(details.initiator || '')) return; // requests made by YouTube pages
 
     try {
       const contentTypeHeader = responseHeaders.find(h => h.name.toLowerCase() === 'content-type');
@@ -105,23 +135,7 @@ chrome.webRequest.onHeadersReceived.addListener(
       }
 
       if (streamType) {
-        if (!detectedStreams[tabId]) {
-          detectedStreams[tabId] = { m3u8: {}, ts: {} };
-        }
-
-        const cleanedUrl = url;
-        const isNew = !detectedStreams[tabId][streamType][cleanedUrl];
-        
-        // Always store/overwrite the URL to keep dynamic token fresh!
-        detectedStreams[tabId][streamType][cleanedUrl] = url;
-        
-        if (isNew) {
-          updateBadge(tabId);
-          // Broadcast detected stream list update to popup if open
-          chrome.runtime.sendMessage({ action: 'STREAMS_UPDATED', tabId }, () => {
-            if (chrome.runtime.lastError) { /* ignore */ }
-          });
-        }
+        ready.then(() => recordStream(tabId, url, streamType));
       }
     } catch (e) {
       console.error("Error in onHeadersReceived sniffer: ", e);
@@ -137,7 +151,8 @@ function updateBadge(tabId) {
     chrome.action.setBadgeText({ text: '', tabId });
     return;
   }
-  const total = Object.keys(streams.m3u8).length + Object.keys(streams.ts).length;
+  const shown = streamsForTab(tabId, false);
+  const total = shown.m3u8.length + shown.ts.length;
   chrome.action.setBadgeText({
     text: total > 0 ? total.toString() : '',
     tabId
@@ -157,8 +172,21 @@ function updateBadge(tabId) {
 // });
 
 chrome.tabs.onRemoved.addListener((tabId) => {
-  delete detectedStreams[tabId];
+  ready.then(() => {
+    delete detectedStreams[tabId];
+    pruneStreamInfo();
+    persist();
+  });
 });
+
+// Drop parsed playlists no tab refers to any more
+function pruneStreamInfo() {
+  const alive = new Set();
+  Object.values(detectedStreams).forEach(s => Object.keys(s.m3u8).forEach(u => alive.add(u)));
+  Object.keys(streamInfo).forEach(u => {
+    if (!alive.has(u)) delete streamInfo[u];
+  });
+}
 
 // Create offscreen document helper
 async function createOffscreenDocument() {
@@ -171,8 +199,8 @@ async function createOffscreenDocument() {
 
   creatingOffscreenPromise = chrome.offscreen.createDocument({
     url: chrome.runtime.getURL('offscreen.html'),
-    reasons: ['DOM_SCRAPING'],
-    justification: 'Background HLS / TS downloading and video segment merging process'
+    reasons: ['BLOBS'],
+    justification: 'Download HLS / TS segments and merge them into one video Blob for saving'
   }).catch((err) => {
     console.error("Failed to create offscreen document:", err);
   });
@@ -195,74 +223,76 @@ async function hasOffscreenDocument() {
   return false;
 }
 
+// Actions answered here; other messages (popup/offscreen broadcasts) are not ours
+const HANDLED_ACTIONS = new Set([
+  'getStreams', 'clearStreams', 'deleteStream', 'addManualStream', 'getActiveDownloads', 'startDownload',
+  'pauseDownload', 'cancelDownload', 'TRIGGER_DOWNLOAD_FROM_BG', 'SAVE_COMPLETED_TASK', 'DOWNLOAD_PROGRESS',
+  'fetchHlsText', 'OFFSCREEN_IDLE'
+]);
+
 // Message receiver for routing between Popup, Background, and Offscreen Document
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (!HANDLED_ACTIONS.has(message.action)) return false;
+  // Wait until state is restored (the worker may have just been woken up by this message)
+  ready.then(() => handleMessage(message, sendResponse));
+  return true;
+});
+
+function handleMessage(message, sendResponse) {
   const { action, tabId, taskId, url, title, type, resolution } = message;
 
   if (action === 'getStreams') {
-    const streams = detectedStreams[tabId];
-    if (streams) {
-      sendResponse({
-        m3u8: Object.values(streams.m3u8),
-        ts: Object.values(streams.ts)
-      });
-    } else {
-      sendResponse({ m3u8: [], ts: [] });
-    }
-  } 
-  
+    sendResponse(streamsForTab(tabId, message.raw));
+  }
+
   else if (action === 'clearStreams') {
     delete detectedStreams[tabId];
+    pruneStreamInfo();
+    persist();
     updateBadge(tabId);
     sendResponse({ success: true });
-  } 
+  }
 
   else if (action === 'deleteStream') {
+    // Remove every captured URL shown as this entry (token variants, master's variants)
     const streams = detectedStreams[tabId];
-    if (streams) {
-      try {
-        const cleaned = cleanUrlForDeduplication(url);
-        if (type === 'm3u8') delete streams.m3u8[cleaned];
-        else if (type === 'ts') delete streams.ts[cleaned];
-        updateBadge(tabId);
-      } catch(e) {}
+    if (streams && streams[type]) {
+      const targets = message.raw ? [url] : relatedUrls(url, Object.keys(streams[type]), streamInfo);
+      targets.forEach(u => delete streams[type][u]);
+      pruneStreamInfo();
+      persist();
+      updateBadge(tabId);
     }
     sendResponse({ success: true });
   }
 
   else if (action === 'addManualStream') {
-    if (!detectedStreams[tabId]) {
-      detectedStreams[tabId] = { m3u8: {}, ts: {} };
+    if (isBlockedUrl(url)) {
+      sendResponse({ success: false, error: 'blocked' });
+      return;
     }
-    try {
-      const cleaned = cleanUrlForDeduplication(url);
-      if (type === 'm3u8') detectedStreams[tabId].m3u8[cleaned] = url;
-      else if (type === 'ts') detectedStreams[tabId].ts[cleaned] = url;
-      updateBadge(tabId);
-    } catch(e) {}
+    recordStream(tabId, url, type === 'ts' ? 'ts' : 'm3u8');
     sendResponse({ success: true });
   }
-  
+
   else if (action === 'getActiveDownloads') {
-    sendResponse({ activeDownloads });
-  } 
-  
-  else if (action === 'startDownload') {
-    // Find the latest intercepted URL with a fresh token matching the base/cleaned URL
-    let targetUrl = url;
-    try {
-      const cleaned = cleanUrlForDeduplication(url);
-      for (const tId in detectedStreams) {
-        const tabStreams = detectedStreams[tId];
-        if (type === 'm3u8' && tabStreams.m3u8 && tabStreams.m3u8[cleaned]) {
-          targetUrl = tabStreams.m3u8[cleaned];
-          break;
-        } else if (type === 'ts' && tabStreams.ts && tabStreams.ts[cleaned]) {
-          targetUrl = tabStreams.ts[cleaned];
-          break;
-        }
+    // Tasks live in the offscreen document; without it nothing can be running (e.g. it crashed)
+    hasOffscreenDocument().then((alive) => {
+      if (!alive && Object.keys(activeDownloads).length) {
+        Object.keys(activeDownloads).forEach(id => delete activeDownloads[id]);
+        persist();
       }
-    } catch (e) {}
+      sendResponse({ activeDownloads });
+    });
+  }
+
+  else if (action === 'startDownload') {
+    if (isBlockedUrl(url)) {
+      sendResponse({ success: false, error: 'blocked' });
+      return;
+    }
+    // The popup already sends the newest captured URL (fresh token) of the entry
+    const targetUrl = url;
 
     activeDownloads[taskId] = {
       id: taskId,
@@ -277,6 +307,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       downloadedCount: 0,
       totalSegments: 0
     };
+    persist();
 
     createOffscreenDocument().then(() => {
       chrome.runtime.sendMessage({
@@ -296,6 +327,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   else if (action === 'pauseDownload') {
     if (activeDownloads[taskId]) {
       activeDownloads[taskId].state = 'paused';
+      persist();
     }
     chrome.runtime.sendMessage({ action: 'PAUSE_DOWNLOAD', taskId }, () => {
       if (chrome.runtime.lastError) { /* ignore */ }
@@ -305,6 +337,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   
   else if (action === 'cancelDownload') {
     delete activeDownloads[taskId];
+    persist();
     chrome.runtime.sendMessage({ action: 'CANCEL_DOWNLOAD', taskId }, () => {
       if (chrome.runtime.lastError) { /* ignore */ }
     });
@@ -335,6 +368,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           broadcastProgressToPopup(task);
           saveCompletedTaskToStorage(task, message.filename);
           delete activeDownloads[message.taskId];
+          persist();
         }
         chrome.runtime.sendMessage({ action: 'DOWNLOAD_SUCCESS_CLEANUP', taskId: message.taskId, downloadId }, () => {
           if (chrome.runtime.lastError) { /* ignore */ }
@@ -350,6 +384,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       task.state = 'completed';
       saveCompletedTaskToStorage(task, message.filename);
       delete activeDownloads[message.taskId];
+      persist();
     }
     chrome.runtime.sendMessage({ action: 'DOWNLOAD_SUCCESS_CLEANUP', taskId: message.taskId }, () => {
       if (chrome.runtime.lastError) { /* ignore */ }
@@ -358,6 +393,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   else if (action === 'DOWNLOAD_PROGRESS') {
+    // Rebuild the entry if it was lost (offscreen keeps downloading even if this worker restarted)
+    if (!activeDownloads[taskId] && message.url && message.state !== 'completed') {
+      activeDownloads[taskId] = { id: taskId, url: message.url, title: message.title, type: message.type, resolution: message.resolution };
+    }
     const task = activeDownloads[taskId];
     if (task) {
       task.state = message.state;
@@ -371,6 +410,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       if (message.state === 'completed') {
         delete activeDownloads[taskId];
       }
+      persist();
 
       chrome.runtime.sendMessage({
         action: 'DOWNLOAD_PROGRESS_UPDATE',
@@ -383,31 +423,16 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   } 
   
   else if (action === 'fetchHlsText') {
-    // Try without credentials first for public CDNs (wildcard CORS).
-    fetch(url)
-      .then(res => {
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        return res.text();
-      })
+    fetchPlaylistText(url)
       .then(text => sendResponse({ success: true, text }))
-      .catch(err => {
-        // Fallback to with credentials for private/authenticated streams
-        fetch(url, { credentials: 'include' })
-          .then(res => {
-            if (!res.ok) throw new Error(`HTTP ${res.status}`);
-            return res.text();
-          })
-          .then(text => sendResponse({ success: true, text }))
-          .catch(e => sendResponse({ success: false, error: e.message }));
-      });
-    return true; // Keep message channel open for async response
+      .catch(e => sendResponse({ success: false, error: e.message }));
   }
-  
+
   else if (action === 'OFFSCREEN_IDLE') {
     chrome.offscreen.closeDocument().catch(() => {});
     sendResponse({ success: true });
   }
-});
+}
 
 function broadcastProgressToPopup(task) {
   chrome.runtime.sendMessage({

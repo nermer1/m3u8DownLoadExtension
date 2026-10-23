@@ -12,16 +12,35 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   let activeTabId = null;
   let activeTabTitle = '';
+  let tabBlocked = false; // YouTube etc.: tell the user why nothing is detected
   let streamMetadata = {}; // Cache for parsed HLS duration & resolutions
   let activeDownloads = {}; // Cached download progress from background
   let currentGroups = []; // Cache for current grouped streams
   let lastActiveStateStr = ''; // Cached serialized active download states
+  let lastMetaStr = ''; // Cached serialized playlist metadata from background
+  let showRaw = false; // Show every captured URL instead of one entry per video
+
+  const rawToggle = document.getElementById('raw-toggle');
+  try {
+    showRaw = !!(await chrome.storage.local.get({ showRawUrls: false })).showRawUrls;
+  } catch (e) {}
+  rawToggle.checked = showRaw;
+  rawToggle.addEventListener('change', () => {
+    showRaw = rawToggle.checked;
+    chrome.storage.local.set({ showRawUrls: showRaw });
+    currentGroups = [];
+    loadStreams();
+  });
+
+  // Same video even when the token/query changed
+  const sameStream = (a, b) => a === b || pathKeyOf(a) === pathKeyOf(b);
 
   // 1. Get the current active tab info
   const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
   if (activeTab) {
     activeTabId = activeTab.id;
     activeTabTitle = activeTab.title;
+    tabBlocked = isBlockedUrl(activeTab.url || '');
     
     // Load lists
     await getActiveDownloads();
@@ -55,14 +74,17 @@ document.addEventListener('DOMContentLoaded', async () => {
   async function loadStreams() {
     if (!activeTabId) return;
 
-    chrome.runtime.sendMessage({ action: 'getStreams', tabId: activeTabId }, async (response) => {
+    chrome.runtime.sendMessage({ action: 'getStreams', tabId: activeTabId, raw: showRaw }, async (response) => {
       if (chrome.runtime.lastError) {
         console.error("Error communicating with background:", chrome.runtime.lastError);
         return;
       }
-      
-      const { m3u8 = [], ts = [] } = response || {};
-      
+
+      const { m3u8 = [], ts = [], meta = {} } = response || {};
+      // Duration / resolutions already parsed by the background
+      Object.keys(meta).forEach(u => { streamMetadata[u] = meta[u]; });
+      const metaStr = JSON.stringify(meta);
+
       // Group streams
       const newGroups = groupStreams(m3u8, ts);
       
@@ -78,21 +100,23 @@ document.addEventListener('DOMContentLoaded', async () => {
       const hasChanged = (currentKeys !== newKeys) || 
                          (currentSubUrlsCount !== newSubUrlsCount) || 
                          (currentGroups.length !== newGroups.length) ||
-                         (activeStateStr !== lastActiveStateStr);
-      
+                         (activeStateStr !== lastActiveStateStr) ||
+                         (metaStr !== lastMetaStr);
+
       if (!hasChanged) {
         // Silently update cache to keep URL objects (with fresh dynamic tokens) fresh in memory
         currentGroups = newGroups;
         return;
       }
-      
+
       currentGroups = newGroups;
       lastActiveStateStr = activeStateStr;
-      
+      lastMetaStr = metaStr;
+
       // Update badge count based on grouped items
       totalCount.textContent = currentGroups.length;
 
-      if (currentGroups.length === 0) {
+      if (currentGroups.length === 0 && Object.keys(activeDownloads).length === 0) {
         renderEmptyState();
         return;
       }
@@ -117,17 +141,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                 
                 // Bind resolutions
                 if (selectEl) {
-                  const freshGroup = currentGroups.find(g => g.groupKey === group.groupKey) || group;
-                  let resolutions = ['best'];
-                  if (Object.keys(freshGroup.urls).length > 0) {
-                    const detected = Object.keys(freshGroup.urls).sort((a, b) => parseInt(b) - parseInt(a));
-                    resolutions = ['best', ...detected];
-                  }
-                  if (meta.resolutions) {
-                    const combined = new Set([...resolutions, ...meta.resolutions]);
-                    resolutions = Array.from(combined);
-                  }
-
+                  const resolutions = resolutionOptions(meta);
                   selectEl.innerHTML = '';
                   resolutions.forEach(res => {
                     const opt = document.createElement('option');
@@ -196,6 +210,12 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
   }
 
+  // 'best' + resolutions listed in a master playlist (the offscreen picks the matching variant)
+  function resolutionOptions(meta) {
+    const list = (meta && meta.resolutions) || [];
+    return Array.from(new Set(['best', ...list.filter(r => r !== 'best')]));
+  }
+
   function extractM3u8Resolutions(text) {
     const matches = text.matchAll(/RESOLUTION=(\d+x\d+)/g);
     const resolutions = new Set();
@@ -212,6 +232,16 @@ document.addEventListener('DOMContentLoaded', async () => {
 
 
   function renderEmptyState() {
+    if (tabBlocked) {
+      streamsList.innerHTML = `
+      <div class="empty-state">
+        <svg viewBox="0 0 24 24" class="empty-icon"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zM4 12c0-4.42 3.58-8 8-8 1.85 0 3.55.63 4.9 1.69L5.69 16.9A7.902 7.902 0 0 1 4 12zm8 8c-1.85 0-3.55-.63-4.9-1.69L18.31 7.1A7.902 7.902 0 0 1 20 12c0 4.42-3.58 8-8 8z"/></svg>
+        <p>이 사이트는 지원하지 않습니다</p>
+        <span>YouTube 영상은 감지·다운로드하지 않습니다.</span>
+      </div>
+    `;
+      return;
+    }
     streamsList.innerHTML = `
       <div class="empty-state">
         <div class="pulse-ring"></div>
@@ -322,13 +352,48 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   function renderStreamsList() {
     streamsList.innerHTML = '';
-    if (currentGroups.length === 0) {
+    if (currentGroups.length === 0 && Object.keys(activeDownloads).length === 0) {
       renderEmptyState();
       return;
     }
 
     currentGroups.forEach(group => {
       streamsList.appendChild(createStreamCard(group));
+    });
+    renderDownloadOnlyCards();
+  }
+
+  // Downloads whose stream is not in this tab's list (started from another tab, list cleared...)
+  // still get a progress card so a reopened popup always shows them.
+  function renderDownloadOnlyCards() {
+    Object.values(activeDownloads).forEach(task => {
+      if (!task || !task.id || task.state === 'completed' || task.state === 'error') return;
+      if (streamsList.querySelector(`[data-task-id="${task.id}"]`)) return;
+
+      const card = document.createElement('div');
+      card.className = 'stream-card';
+      card.setAttribute('data-task-id', task.id);
+
+      const cardMain = document.createElement('div');
+      cardMain.className = 'card-main';
+
+      const titleRow = document.createElement('div');
+      titleRow.className = 'card-title-row';
+      const typeBadge = document.createElement('span');
+      typeBadge.className = 'card-type-badge';
+      typeBadge.textContent = task.type || 'm3u8';
+      titleRow.appendChild(typeBadge);
+      const titleLabel = document.createElement('span');
+      titleLabel.className = 'card-title';
+      titleLabel.textContent = task.title || task.url;
+      titleLabel.title = titleLabel.textContent;
+      titleRow.appendChild(titleLabel);
+      cardMain.appendChild(titleRow);
+
+      cardMain.appendChild(createProgressLayout(task.id));
+      card.appendChild(cardMain);
+      streamsList.insertBefore(card, streamsList.firstChild);
+      setTimeout(() => updateProgressUI(task), 50);
     });
   }
 
@@ -340,9 +405,9 @@ document.addEventListener('DOMContentLoaded', async () => {
       return currentGroups.find(g => g.groupKey === group.groupKey) || group;
     };
     
-    // Check if we have active download task running for this group
-    const activeTask = Object.values(activeDownloads).find(t => 
-      t.url === group.mainUrl || Object.values(group.urls).includes(t.url)
+    // Check if we have active download task running for this group (token may have changed since)
+    const activeTask = Object.values(activeDownloads).find(t =>
+      t.url && (sameStream(t.url, group.mainUrl) || Object.values(group.urls).some(u => sameStream(t.url, u)))
     );
     const isDownloading = !!activeTask;
 
@@ -512,17 +577,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     resSelect.className = 'card-resolution-select';
     
     // Bind resolutions
-    let resolutions = ['best'];
-    if (Object.keys(group.urls).length > 0) {
-      const detected = Object.keys(group.urls).sort((a, b) => parseInt(b) - parseInt(a));
-      resolutions = ['best', ...detected];
-    }
-    
-    if (meta && meta.resolutions) {
-      const combined = new Set([...resolutions, ...meta.resolutions]);
-      resolutions = Array.from(combined);
-    }
-    
+    const resolutions = resolutionOptions(meta);
     resolutions.forEach(res => {
       const opt = document.createElement('option');
       opt.value = res;
@@ -665,7 +720,11 @@ document.addEventListener('DOMContentLoaded', async () => {
     activeDownloads[task.id] = task;
 
     const card = document.querySelector(`[data-task-id="${task.id}"]`);
-    if (!card) return;
+    if (!card) {
+      // A running download without a card yet (e.g. progress arrived before the list): redraw
+      if (task.state !== 'completed' && task.state !== 'error' && task.url) loadStreams();
+      return;
+    }
 
     const layout = card.querySelector(`[data-progress-layout="${task.id}"]`);
     if (!layout) return;
@@ -713,7 +772,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // Remove stream from active tab list
   function removeStreamFromTab(url, type) {
-    chrome.runtime.sendMessage({ action: 'deleteStream', tabId: activeTabId, url, type }, () => {
+    chrome.runtime.sendMessage({ action: 'deleteStream', tabId: activeTabId, url, type, raw: showRaw }, () => {
       loadStreams();
     });
   }
@@ -760,7 +819,11 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Add manually to stream cache
     // Let's send to background to add it to detectedStreams
     // We can add a 'addManualStream' message in background.js.
-    chrome.runtime.sendMessage({ action: 'addManualStream', tabId: activeTabId, url, type }, () => {
+    chrome.runtime.sendMessage({ action: 'addManualStream', tabId: activeTabId, url, type }, (response) => {
+      if (response && response.error === 'blocked') {
+        alert('YouTube 영상은 지원하지 않습니다.');
+        return;
+      }
       loadStreams();
     });
     manualUrlInput.value = '';

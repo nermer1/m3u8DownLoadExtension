@@ -213,6 +213,27 @@ body {
   color: var(--color-danger);
 }
 
+.section-tools {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.raw-toggle {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.raw-toggle input {
+  margin: 0;
+  accent-color: var(--color-purple);
+}
+
 /* Streams List */
 .streams-list {
   display: flex;
