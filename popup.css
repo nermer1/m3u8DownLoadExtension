@@ -1,3 +1,12 @@
+/* Outfit (SIL OFL 1.1, licenses/Outfit-OFL.txt) bundled so the popup makes no external requests */
+@font-face {
+  font-family: 'Outfit';
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url('fonts/outfit-latin-wght-normal.woff2') format('woff2');
+}
+
 /* Custom Dark Theme Variables */
 :root {
   --bg-app: #0d0b14;

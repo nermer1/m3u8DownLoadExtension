@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "MediaDown - HLS/TS Video Downloader",
+  "name": "MediaDown - HLS/MP4 Video Downloader",
   "version": "1.2",
-  "description": "웹페이지에서 재생되는 HLS (.m3u8) 및 TS 비디오 스트림을 감지하여 해상도 선택 후 즉시 병합 다운로드해 줍니다.",
+  "description": "웹페이지에서 재생되는 HLS(.m3u8)·TS 스트림과 MP4·WebM 영상을 감지해 화질을 골라 한 파일로 저장합니다.",
   "permissions": [
     "webRequest",
     "downloads",

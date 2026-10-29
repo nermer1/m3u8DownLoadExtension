@@ -1,0 +1,11 @@
+# 웹스토어 zip(git archive)에서 제외 — 확장 실행 파일만 들어가게
+.gitattributes export-ignore
+.gitignore export-ignore
+README.md export-ignore
+PRIVACY.md export-ignore
+store/ export-ignore
+.idea/ export-ignore
+
+# 공식 배포본 그대로 유지 (줄바꿈 변환 금지)
+*.min.js -text
+*.woff2 binary
