@@ -121,11 +121,11 @@ async function startTask(taskId, url, title, type, resolution) {
         if (task.seqStartVal > 1) {
           try {
             const probeUrl0 = getSequenceUrl(task, 0 - task.seqStartVal);
-            if (await urlExists(probeUrl0)) {
+            if (await urlExists(task, probeUrl0)) {
               task.seqStartVal = 0;
             } else {
               const probeUrl1 = getSequenceUrl(task, 1 - task.seqStartVal);
-              if (await urlExists(probeUrl1)) {
+              if (await urlExists(task, probeUrl1)) {
                 task.seqStartVal = 1;
               }
             }
@@ -157,18 +157,49 @@ function getSequenceUrl(task, idx) {
   return task.seqBasePath + task.seqPrefix + valStr + task.seqSuffix;
 }
 
-async function urlExists(url) {
+async function urlExists(task, url) {
   try {
-    const res = await fetch(url, { method: 'HEAD' });
+    const res = await taskFetch(task, url, { method: 'HEAD' });
     return res.ok;
   } catch(e) {
     try {
-      const res = await fetch(url);
+      const res = await taskFetch(task, url);
       return res.ok;
     } catch(err) {
       return false;
     }
   }
+}
+
+// Some sites serve the video only with the user's cookies (the detection in background.js already
+// retries this way). Retry once with credentials and keep using them for the rest of the task.
+async function taskFetch(task, url, opts = {}) {
+  if (task.useCredentials) return fetch(url, { ...opts, credentials: 'include' });
+  try {
+    const res = await fetch(url, opts);
+    if (res.status !== 401 && res.status !== 403) return res;
+  } catch (e) {
+    if (e.name === 'AbortError') throw e;
+  }
+  const retry = await fetch(url, { ...opts, credentials: 'include' });
+  if (retry.ok) task.useCredentials = true;
+  return retry;
+}
+
+// Error with the likely reason for 401/403 and the start of the server's message
+async function httpError(what, url, response) {
+  let msg = `${what ? what + ' ' : ''}(HTTP ${response.status})`;
+  if (response.status === 401 || response.status === 403) {
+    const tokenLike = /[?&](expires?|exp|e|token|tk|sig|signature|hdnts|hdntl|policy|key-pair-id|st|auth|hash|md5)=/i.test(url);
+    msg += tokenLike
+      ? ' — 주소의 인증 토큰이 만료됐을 수 있습니다. 페이지에서 영상을 다시 재생한 직후에 받아보세요.'
+      : ' — 쿠키를 붙여 다시 시도했지만 거부됐습니다. 사이트가 자기 페이지에서 온 요청만 허용하는 것 같습니다(Referer 확인).';
+  }
+  try {
+    const body = (await response.text()).replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 100);
+    if (body) msg += ` [서버 응답: ${body}]`;
+  } catch (e) {}
+  return new Error(msg);
 }
 
 // Pause a task
@@ -207,9 +238,9 @@ async function fetchAndParseM3u8Recursively(task, url, depth = 0) {
     throw new Error('M3U8 호출 깊이가 너무 깊습니다.');
   }
 
-  const response = await fetch(url);
+  const response = await taskFetch(task, url);
   if (!response.ok) {
-    throw new Error(`재생목록 로드 실패 (HTTP ${response.status})`);
+    throw await httpError('재생목록 로드 실패', url, response);
   }
   
   const text = await response.text();
@@ -244,13 +275,13 @@ async function fetchAndParseM3u8Recursively(task, url, depth = 0) {
         const ivMatch = line.match(/IV=0x([0-9a-fA-F]+)/i);
         if (uriMatch) {
           const keyUrl = resolveUrl(baseUrl, uriMatch[1]);
-          try {
-            const keyRes = await fetch(keyUrl);
-            const keyBuffer = await keyRes.arrayBuffer();
-            currentKey = await crypto.subtle.importKey('raw', keyBuffer, { name: 'AES-CBC' }, false, ['decrypt']);
-          } catch(e) {
-            console.error("Failed to fetch AES key:", e);
+          // Without the key every segment would fail to decrypt: stop here with the real reason
+          const keyRes = await taskFetch(task, keyUrl);
+          if (!keyRes.ok) {
+            throw await httpError('암호화 키 로드 실패', keyUrl, keyRes);
           }
+          const keyBuffer = await keyRes.arrayBuffer();
+          currentKey = await crypto.subtle.importKey('raw', keyBuffer, { name: 'AES-CBC' }, false, ['decrypt']);
         }
         if (ivMatch) {
           const hex = ivMatch[1].padStart(32, '0');
@@ -434,13 +465,13 @@ async function downloadSequenceWorker(task) {
 
     while (retries > 0 && !success && task.state === 'downloading') {
       try {
-        const response = await fetch(url, { signal: task.abortController.signal });
+        const response = await taskFetch(task, url, { signal: task.abortController.signal });
         if (response.status === 404) {
           is404 = true;
           break;
         }
         if (!response.ok) {
-          throw new Error(`HTTP ${response.status}`);
+          throw await httpError('', url, response);
         }
 
         const reader = response.body.getReader();
@@ -504,9 +535,9 @@ function getNextIndex(task) {
 
 // Fetch segment chunk and optionally decrypt
 async function fetchSegment(task, url, signal, key = null, iv = null) {
-  const response = await fetch(url, { signal });
+  const response = await taskFetch(task, url, { signal });
   if (!response.ok) {
-    throw new Error(`HTTP ${response.status}`);
+    throw await httpError('', url, response);
   }
 
   const reader = response.body.getReader();
