@@ -618,17 +618,18 @@ function mergeAndSaveTask(task) {
   if (!task.isFmp4 && typeof muxjs !== 'undefined') {
     try {
       const transmuxer = new muxjs.mp4.Transmuxer();
-      const remuxedChunks = [];
+      // Collects mux.js's fragments (kept as Blobs: Chrome can keep large Blobs on disk, and no single
+      // buffer the size of the whole video is ever allocated) and rebuilds them into a regular MP4
+      const mp4 = new FaststartMp4();
       let initSegment = null;
 
-      // Each output fragment goes straight into a Blob part: Chrome can keep large Blobs on disk,
-      // and no single buffer the size of the whole video is ever allocated (that failed for long videos)
       transmuxer.on('data', (segment) => {
         if (segment.initSegment && !initSegment) {
           initSegment = segment.initSegment;
+          mp4.setInit(initSegment);
         }
         if (segment.data) {
-          remuxedChunks.push(new Blob([segment.data]));
+          mp4.addFragment(segment.data);
         }
       });
       // Time span of the whole output (90kHz clock) for the file's duration
@@ -647,21 +648,37 @@ function mergeAndSaveTask(task) {
         transmuxer.flush();
       }
 
-      if (remuxedChunks.length > 0) {
-        if (initSegment && lastPts > firstPts) initSegment = withDuration(initSegment, lastPts - firstPts);
-        finalBlob = new Blob(initSegment ? [initSegment, ...remuxedChunks] : remuxedChunks, { type: 'video/mp4' });
+      if (mp4.fragments.length > 0) {
+        try {
+          finalBlob = mp4.toBlob();
+        } catch (err) {
+          // Could not rebuild: save the fragmented MP4 as mux.js made it (plays, seeks slower)
+          console.warn('Regular MP4 rebuild failed, saving fragmented MP4:', err);
+          const init = initSegment && lastPts > firstPts ? withDuration(initSegment, lastPts - firstPts) : initSegment;
+          finalBlob = new Blob(init ? [init, ...mp4.fragments] : mp4.fragments, { type: 'video/mp4' });
+        }
       } else {
         finalBlob = new Blob(validChunks, { type: 'video/mp2t' });
         defaultExt = '.ts';
       }
     } catch (err) {
-      console.error("Mux.js remuxing failed:", err);
+      console.warn('Mux.js remuxing failed, saving the original TS:', err);
       finalBlob = new Blob(validChunks, { type: 'video/mp2t' });
       defaultExt = '.ts';
     }
+  } else if (task.isFmp4) {
+    // fMP4 HLS: the segments already are fragments of one MP4 (EXT-X-MAP init + moof/mdat)
+    const mp4 = new FaststartMp4();
+    validChunks.forEach(chunk => mp4.addSegment(chunk));
+    try {
+      finalBlob = mp4.toBlob();
+    } catch (err) {
+      console.warn('Regular MP4 rebuild failed, saving fragmented MP4:', err);
+      finalBlob = new Blob(validChunks, { type: 'video/mp4' });
+    }
   } else {
-    finalBlob = new Blob(validChunks, { type: task.isFmp4 ? 'video/mp4' : 'video/mp2t' });
-    if (!task.isFmp4) defaultExt = '.ts';
+    finalBlob = new Blob(validChunks, { type: 'video/mp2t' });
+    defaultExt = '.ts';
   }
 
   task.state = 'saving';
