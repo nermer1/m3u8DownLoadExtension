@@ -6,7 +6,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   const { action, taskId, url, title, type, resolution, downloadId, errorMsg } = message;
 
   if (action === 'START_DOWNLOAD') {
-    startTask(taskId, url, title, type, resolution);
+    startTask(taskId, url, title, type, resolution, message.pageHeaders);
     sendResponse({ success: true });
   } else if (action === 'PAUSE_DOWNLOAD') {
     pauseTask(taskId);
@@ -34,7 +34,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 });
 
 // Start a download task
-async function startTask(taskId, url, title, type, resolution) {
+async function startTask(taskId, url, title, type, resolution, pageHeaders) {
   let task = activeTasks[taskId];
 
   if (!task) {
@@ -44,6 +44,9 @@ async function startTask(taskId, url, title, type, resolution) {
       title: title,
       type: type,
       resolution: resolution,
+      pageHeaders: pageHeaders || null, // { referer, origin } of the page the video was played on
+      headerHosts: new Set(),
+      headerRulePromise: null,
       state: 'parsing',
       downloadedCount: 0,
       totalSegments: 0,
@@ -174,6 +177,7 @@ async function urlExists(task, url) {
 // Some sites serve the video only with the user's cookies (the detection in background.js already
 // retries this way). Retry once with credentials and keep using them for the rest of the task.
 async function taskFetch(task, url, opts = {}) {
+  await usePageHeaders(task, url);
   if (task.useCredentials) return fetch(url, { ...opts, credentials: 'include' });
   try {
     const res = await fetch(url, opts);
@@ -186,19 +190,48 @@ async function taskFetch(task, url, opts = {}) {
   return retry;
 }
 
+// Some sites only serve requests coming from their own page: ask the background to send the page's
+// Referer/Origin with this task's requests. The rule lists the hosts seen so far, so it is updated per new host.
+function usePageHeaders(task, url) {
+  if (!task.pageHeaders) return Promise.resolve();
+  let host;
+  try { host = new URL(url).hostname; } catch (e) { return Promise.resolve(); }
+  if (task.headerHosts.has(host)) return task.headerRulePromise;
+  task.headerHosts.add(host);
+  task.headerRulePromise = new Promise((resolve) => {
+    chrome.runtime.sendMessage({
+      action: 'setPageHeaders',
+      taskId: task.id,
+      hosts: [...task.headerHosts],
+      pageHeaders: task.pageHeaders
+    }, () => {
+      if (chrome.runtime.lastError) { /* download without page headers */ }
+      resolve();
+    });
+  });
+  return task.headerRulePromise;
+}
+
 // Error with the likely reason for 401/403 and the start of the server's message
 async function httpError(what, url, response) {
   let msg = `${what ? what + ' ' : ''}(HTTP ${response.status})`;
+  let body = '';
+  try { body = await response.text(); } catch (e) {}
+  // Cloudflare's own block/challenge page (a 403 passed through from the origin server has its own body)
+  const cloudflare = /cloudflare|attention required|just a moment/i.test(body);
+
   if (response.status === 401 || response.status === 403) {
     const tokenLike = /[?&](expires?|exp|e|token|tk|sig|signature|hdnts|hdntl|policy|key-pair-id|st|auth|hash|md5)=/i.test(url);
-    msg += tokenLike
-      ? ' — 주소의 인증 토큰이 만료됐을 수 있습니다. 페이지에서 영상을 다시 재생한 직후에 받아보세요.'
-      : ' — 쿠키를 붙여 다시 시도했지만 거부됐습니다. 사이트가 자기 페이지에서 온 요청만 허용하는 것 같습니다(Referer 확인).';
+    if (cloudflare) {
+      msg += ' — 사이트의 Cloudflare 보안 설정이 확장의 요청을 차단했습니다. 이 사이트는 다운로드를 지원하지 않습니다.';
+    } else if (tokenLike) {
+      msg += ' — 주소의 인증 토큰이 만료됐을 수 있습니다. 페이지에서 영상을 다시 재생한 직후에 받아보세요.';
+    } else {
+      msg += ' — 쿠키와 원래 페이지 정보를 붙여 보냈지만 거부됐습니다. 사이트 보호 설정으로 막힌 것 같습니다.';
+    }
   }
-  try {
-    const body = (await response.text()).replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 100);
-    if (body) msg += ` [서버 응답: ${body}]`;
-  } catch (e) {}
+  const text = body.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 100);
+  if (text) msg += ` [서버 응답: ${text}]`;
   return new Error(msg);
 }
 

@@ -16,7 +16,7 @@
 
 - **YouTube** (`youtube.com`, `googlevideo.com` 등): Chrome 웹스토어 정책. 감지·다운로드하지 않고 팝업에 안내
 - **DRM 보호 영상** (SAMPLE-AES, Widevine·PlayReady·FairPlay): 재생목록에 있으면 중단
-- 자기 페이지에서 온 요청만 허용하는 사이트(Referer 확인)는 403 으로 실패할 수 있음
+- HLS 다운로드 중에는 확장의 요청에 영상이 재생된 페이지의 Referer·Origin 을 붙인다 (다운로드별 세션 규칙, 끝나면 삭제). 그래도 Cloudflare 봇 검사 등으로 막는 사이트는 403 으로 실패할 수 있음
 
 권리가 있는 영상만 저장하세요.
 

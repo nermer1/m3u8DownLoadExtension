@@ -636,6 +636,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       chrome.runtime.sendMessage({
         action: 'startDownload',
         taskId,
+        tabId: activeTabId, // the page's address is sent as Referer while downloading
         url: downloadUrl,
         title: targetTitle,
         type: freshGroup.type,

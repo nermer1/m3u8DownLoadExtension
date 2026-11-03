@@ -2,15 +2,17 @@ importScripts('streams.js');
 
 const detectedStreams = {}; // { [tabId]: { m3u8: { [url]: url }, ts: {...}, file: {...} } } oldest first
 const streamInfo = {}; // { [m3u8 url]: parsePlaylist() result, [file url]: { kind: 'file', ext, size } }
+const streamSource = {}; // { [url]: origin of the page/frame that requested it } — sent as Referer/Origin when downloading
 const activeDownloads = {};
 let creatingOffscreenPromise = null;
 
 const MAX_URLS_PER_TYPE = 300;
 // The service worker is stopped after ~30s idle and loses globals.
 // Keep detected streams and download progress in storage.session and restore them on wake-up.
-const ready = chrome.storage.session.get(['detectedStreams', 'streamInfo', 'activeDownloads']).then((saved) => {
+const ready = chrome.storage.session.get(['detectedStreams', 'streamInfo', 'streamSource', 'activeDownloads']).then((saved) => {
   Object.assign(detectedStreams, saved.detectedStreams || {});
   Object.assign(streamInfo, saved.streamInfo || {});
+  Object.assign(streamSource, saved.streamSource || {});
   Object.assign(activeDownloads, saved.activeDownloads || {});
 }).catch(() => {});
 
@@ -18,14 +20,15 @@ let persistTimer = null;
 function persist() {
   clearTimeout(persistTimer);
   persistTimer = setTimeout(() => {
-    chrome.storage.session.set({ detectedStreams, streamInfo, activeDownloads }).catch(() => {});
+    chrome.storage.session.set({ detectedStreams, streamInfo, streamSource, activeDownloads }).catch(() => {});
   }, 300);
 }
 
 // Remember a captured stream URL for the tab (newest last) and analyze new playlists
-//   fileInfo: { ext, size } for direct video files
-function recordStream(tabId, url, streamType, fileInfo) {
+//   fileInfo: { ext, size } for direct video files, initiator: origin of the requesting page/frame
+function recordStream(tabId, url, streamType, fileInfo, initiator) {
   if (isBlockedUrl(url)) return;
+  if (initiator && initiator !== 'null') streamSource[url] = initiator;
   if (!detectedStreams[tabId]) {
     detectedStreams[tabId] = { m3u8: {}, ts: {}, file: {} };
   }
@@ -41,7 +44,10 @@ function recordStream(tabId, url, streamType, fileInfo) {
   bucket[url] = url;
   const keys = Object.keys(bucket);
   if (keys.length > MAX_URLS_PER_TYPE) {
-    keys.slice(0, keys.length - MAX_URLS_PER_TYPE).forEach(k => delete bucket[k]);
+    keys.slice(0, keys.length - MAX_URLS_PER_TYPE).forEach(k => {
+      delete bucket[k];
+      delete streamSource[k];
+    });
   }
   persist();
 
@@ -130,7 +136,7 @@ chrome.webRequest.onBeforeRequest.addListener(
       }
 
       if (streamType) {
-        ready.then(() => recordStream(tabId, url, streamType));
+        ready.then(() => recordStream(tabId, url, streamType, null, details.initiator));
       }
     } catch (e) {
       console.error("Error parsing URL in webRequest: ", e);
@@ -157,13 +163,13 @@ chrome.webRequest.onHeadersReceived.addListener(
       }
 
       if (streamType) {
-        ready.then(() => recordStream(tabId, url, streamType));
+        ready.then(() => recordStream(tabId, url, streamType, null, details.initiator));
         return;
       }
 
       const file = detectVideoFile(details, contentType);
       if (file) {
-        ready.then(() => recordStream(tabId, url, 'file', file));
+        ready.then(() => recordStream(tabId, url, 'file', file, details.initiator));
       }
     } catch (e) {
       console.error("Error in onHeadersReceived sniffer: ", e);
@@ -217,6 +223,69 @@ function pruneStreamInfo() {
   Object.keys(streamInfo).forEach(u => {
     if (!alive.has(u)) delete streamInfo[u];
   });
+  const known = new Set();
+  Object.values(detectedStreams).forEach(s => ['m3u8', 'ts', 'file'].forEach(t => Object.keys(s[t] || {}).forEach(u => known.add(u))));
+  Object.keys(streamSource).forEach(u => {
+    if (!known.has(u)) delete streamSource[u];
+  });
+}
+
+// ---- Page headers: some sites (e.g. Cloudflare rules) only serve requests that come from their own page.
+// While an HLS task runs, its requests carry the Referer/Origin the page itself would send (one session rule per task).
+
+// Referer/Origin of the page the stream was played on; null when unknown
+async function pageHeadersFor(url, tabId) {
+  let tabUrl = '';
+  if (tabId != null && tabId >= 0) {
+    try { tabUrl = (await chrome.tabs.get(tabId)).url || ''; } catch (e) {}
+  }
+  let tabOrigin = '';
+  try { tabOrigin = /^https?:/.test(tabUrl) ? new URL(tabUrl).origin : ''; } catch (e) {}
+  // A chosen resolution the player never requested: use the latest playlist the tab's player requested
+  const tabPlaylists = Object.keys((detectedStreams[tabId] || {}).m3u8 || {}).filter(u => streamSource[u]);
+  const origin = streamSource[url] || streamSource[tabPlaylists[tabPlaylists.length - 1]] || tabOrigin;
+  if (!/^https?:\/\//.test(origin)) return null;
+  // Played in the page itself: its full address. In an embedded player frame: that frame's site
+  return { origin, referer: origin === tabOrigin ? tabUrl : origin + '/' };
+}
+
+function ruleIdOf(taskId) {
+  const n = parseInt(String(taskId).replace(/\D/g, ''), 10) || 0;
+  return (n % 1000000000) + 1;
+}
+
+// The extension's own requests have no tab; only the hosts this task fetches from are matched
+function setPageHeaderRule(taskId, hosts, headers) {
+  const id = ruleIdOf(taskId);
+  return chrome.declarativeNetRequest.updateSessionRules({
+    removeRuleIds: [id],
+    addRules: [{
+      id,
+      priority: 1,
+      action: {
+        type: 'modifyHeaders',
+        requestHeaders: [
+          { header: 'referer', operation: 'set', value: headers.referer },
+          { header: 'origin', operation: 'set', value: headers.origin }
+        ]
+      },
+      condition: {
+        requestDomains: hosts,
+        tabIds: [chrome.tabs.TAB_ID_NONE],
+        resourceTypes: ['xmlhttprequest']
+      }
+    }]
+  });
+}
+
+function clearPageHeaderRule(taskId) {
+  chrome.declarativeNetRequest.updateSessionRules({ removeRuleIds: [ruleIdOf(taskId)] }).catch(() => {});
+}
+
+function clearAllPageHeaderRules() {
+  chrome.declarativeNetRequest.getSessionRules()
+    .then(rules => chrome.declarativeNetRequest.updateSessionRules({ removeRuleIds: rules.map(r => r.id) }))
+    .catch(() => {});
 }
 
 // Create offscreen document helper
@@ -258,7 +327,7 @@ async function hasOffscreenDocument() {
 const HANDLED_ACTIONS = new Set([
   'getStreams', 'clearStreams', 'deleteStream', 'addManualStream', 'getActiveDownloads', 'startDownload',
   'pauseDownload', 'cancelDownload', 'TRIGGER_DOWNLOAD_FROM_BG', 'SAVE_COMPLETED_TASK', 'DOWNLOAD_PROGRESS',
-  'fetchHlsText', 'OFFSCREEN_IDLE'
+  'fetchHlsText', 'OFFSCREEN_IDLE', 'setPageHeaders'
 ]);
 
 // Message receiver for routing between Popup, Background, and Offscreen Document
@@ -318,6 +387,7 @@ function handleMessage(message, sendResponse) {
         Object.values(activeDownloads).forEach(t => {
           if (t.type !== 'file') delete activeDownloads[t.id];
         });
+        clearAllPageHeaderRules();
       }
       await refreshFileTasks();
       persist();
@@ -358,14 +428,15 @@ function handleMessage(message, sendResponse) {
     };
     persist();
 
-    createOffscreenDocument().then(() => {
+    Promise.all([pageHeadersFor(targetUrl, tabId), createOffscreenDocument()]).then(([pageHeaders]) => {
       chrome.runtime.sendMessage({
         action: 'START_DOWNLOAD',
         taskId,
         url: targetUrl,
         title,
         type,
-        resolution
+        resolution,
+        pageHeaders
       }, () => {
         if (chrome.runtime.lastError) { /* ignore channel close when offscreen is booting */ }
       });
@@ -396,6 +467,7 @@ function handleMessage(message, sendResponse) {
     if (task && task.type === 'file') {
       if (task.downloadId != null) chrome.downloads.cancel(task.downloadId, () => void chrome.runtime.lastError);
     } else {
+      clearPageHeaderRule(taskId);
       chrome.runtime.sendMessage({ action: 'CANCEL_DOWNLOAD', taskId }, () => {
         if (chrome.runtime.lastError) { /* ignore */ }
       });
@@ -439,6 +511,7 @@ function handleMessage(message, sendResponse) {
   
   else if (action === 'SAVE_COMPLETED_TASK') {
     const task = activeDownloads[message.taskId] || message.task || { id: message.taskId, url: message.taskUrl, title: message.taskTitle };
+    clearPageHeaderRule(message.taskId);
     if (task) {
       task.state = 'completed';
       delete activeDownloads[message.taskId];
@@ -456,6 +529,7 @@ function handleMessage(message, sendResponse) {
   }
 
   else if (action === 'DOWNLOAD_PROGRESS') {
+    if (message.state === 'completed' || message.state === 'error') clearPageHeaderRule(taskId);
     // Rebuild the entry if it was lost (offscreen keeps downloading even if this worker restarted)
     if (!activeDownloads[taskId] && message.url && message.state !== 'completed') {
       activeDownloads[taskId] = { id: taskId, url: message.url, title: message.title, type: message.type, resolution: message.resolution };
@@ -488,6 +562,12 @@ function handleMessage(message, sendResponse) {
   else if (action === 'fetchHlsText') {
     fetchPlaylistText(url)
       .then(text => sendResponse({ success: true, text }))
+      .catch(e => sendResponse({ success: false, error: e.message }));
+  }
+
+  else if (action === 'setPageHeaders') {
+    setPageHeaderRule(taskId, message.hosts, message.pageHeaders)
+      .then(() => sendResponse({ success: true }))
       .catch(e => sendResponse({ success: false, error: e.message }));
   }
 

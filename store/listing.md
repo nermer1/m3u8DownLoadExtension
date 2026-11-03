@@ -9,6 +9,7 @@
 ## 1. 패키지
 
 - 새 항목 → `dist/mediadown-1.2.zip` 업로드
+- 업데이트(1.3) → 패키지 탭에서 `dist/mediadown-1.3.zip` 새 패키지 업로드 → 개인정보 보호 관행 탭에 `declarativeNetRequestWithHostAccess` 사유 추가 → 제출
 
 ## 2. 스토어 등록정보
 
@@ -88,6 +89,12 @@ chrome.storage.session keeps detected streams and download progress while the se
 
 ```
 An offscreen document (reason BLOBS) downloads the HLS segments, merges them into one MP4 Blob with the bundled mux.js and saves it. A service worker cannot hold Blobs or create object URLs for this.
+```
+
+**declarativeNetRequestWithHostAccess**
+
+```
+Some video hosts only serve the stream to requests that come from the page it is played on. While a download the user started is running, a session rule sets the Referer/Origin headers of the extension's own requests (no tab, only the hosts of that stream) to the page the video was played on. The rule is removed when the download ends. Page requests are never modified or blocked.
 ```
 
 **호스트 권한 (<all_urls>)**
