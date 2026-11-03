@@ -620,44 +620,36 @@ function mergeAndSaveTask(task) {
       const transmuxer = new muxjs.mp4.Transmuxer();
       const remuxedChunks = [];
       let initSegment = null;
-      
+
+      // Each output fragment goes straight into a Blob part: Chrome can keep large Blobs on disk,
+      // and no single buffer the size of the whole video is ever allocated (that failed for long videos)
       transmuxer.on('data', (segment) => {
         if (segment.initSegment && !initSegment) {
           initSegment = segment.initSegment;
         }
         if (segment.data) {
-          remuxedChunks.push(segment.data);
+          remuxedChunks.push(new Blob([segment.data]));
         }
       });
-      
-      // Push chunks segment-by-segment
+      // Time span of the whole output (90kHz clock) for the file's duration
+      let firstPts = Infinity;
+      let lastPts = 0;
+      const onTiming = (info) => {
+        firstPts = Math.min(firstPts, info.start.pts);
+        lastPts = Math.max(lastPts, info.end.pts);
+      };
+      transmuxer.on('videoSegmentTimingInfo', onTiming);
+      transmuxer.on('audioSegmentTimingInfo', onTiming);
+
+      // Push and flush segment-by-segment so mux.js never holds the whole stream
       for (let chunk of validChunks) {
         transmuxer.push(new Uint8Array(chunk));
+        transmuxer.flush();
       }
-      // Flush once at the end to trigger final data events
-      transmuxer.flush();
-      
+
       if (remuxedChunks.length > 0) {
-        // Concatenate MP4 chunks including initSegment
-        let totalMp4Length = initSegment ? initSegment.byteLength : 0;
-        for (let chunk of remuxedChunks) {
-          totalMp4Length += chunk.byteLength;
-        }
-        
-        const mp4Bytes = new Uint8Array(totalMp4Length);
-        let mp4Offset = 0;
-        
-        if (initSegment) {
-          mp4Bytes.set(initSegment, mp4Offset);
-          mp4Offset += initSegment.byteLength;
-        }
-        
-        for (let chunk of remuxedChunks) {
-          mp4Bytes.set(new Uint8Array(chunk), mp4Offset);
-          mp4Offset += chunk.byteLength;
-        }
-        
-        finalBlob = new Blob([mp4Bytes], { type: 'video/mp4' });
+        if (initSegment && lastPts > firstPts) initSegment = withDuration(initSegment, lastPts - firstPts);
+        finalBlob = new Blob(initSegment ? [initSegment, ...remuxedChunks] : remuxedChunks, { type: 'video/mp4' });
       } else {
         finalBlob = new Blob(validChunks, { type: 'video/mp2t' });
         defaultExt = '.ts';
@@ -705,6 +697,43 @@ function mergeAndSaveTask(task) {
   }, () => {
     if (chrome.runtime.lastError) { /* ignore */ }
   });
+}
+
+// mux.js writes "unknown" (0xFFFFFFFF) durations into the init segment, so players guess the length
+// from the first fragment only. Write the real length into mvhd / tkhd / mdhd of a copy.
+function withDuration(initSegment, duration90k) {
+  const out = new Uint8Array(initSegment);
+  const view = new DataView(out.buffer, out.byteOffset, out.byteLength);
+  let movieScale = 90000;
+  const write = (offset, version, value) => {
+    if (version === 1) view.setBigUint64(offset, BigInt(value));
+    else if (value < 0xFFFFFFFF) view.setUint32(offset, value);
+  };
+  const inScale = (scale) => Math.round(duration90k * scale / 90000);
+
+  const walk = (start, end) => {
+    let o = start;
+    while (o + 8 <= end) {
+      const size = view.getUint32(o);
+      const type = String.fromCharCode(out[o + 4], out[o + 5], out[o + 6], out[o + 7]);
+      if (size < 8 || o + size > end) return;
+      const v = out[o + 8];
+      if (type === 'moov' || type === 'trak' || type === 'mdia') {
+        walk(o + 8, o + size);
+      } else if (type === 'mvhd') {
+        movieScale = view.getUint32(o + (v === 1 ? 28 : 20));
+        write(o + (v === 1 ? 32 : 24), v, inScale(movieScale));
+      } else if (type === 'tkhd') {
+        write(o + (v === 1 ? 36 : 28), v, inScale(movieScale));
+      } else if (type === 'mdhd') {
+        const scale = view.getUint32(o + (v === 1 ? 28 : 20));
+        write(o + (v === 1 ? 32 : 24), v, inScale(scale));
+      }
+      o += size;
+    }
+  };
+  walk(0, out.byteLength);
+  return out;
 }
 
 // Clean filename helper
