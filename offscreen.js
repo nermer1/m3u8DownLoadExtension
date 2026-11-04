@@ -94,7 +94,13 @@ async function startTask(taskId, url, title, type, resolution, pageHeaders) {
     
     // Parse M3U8 list recursively to get segments
     if (type === 'm3u8') {
-      task.segmentUrls = await fetchAndParseM3u8Recursively(task, targetUrl);
+      const video = await fetchAndParseM3u8Recursively(task, targetUrl);
+      // Audio the stream keeps in its own playlist (#EXT-X-MEDIA): downloaded after the video, muxed in on save
+      const audio = task.audioPlaylistUrl && video.length ? await fetchAndParseM3u8Recursively(task, task.audioPlaylistUrl) : [];
+      task.isFmp4 = video.some(seg => seg.init);
+      task.audioIsFmp4 = audio.some(seg => seg.init);
+      task.videoSegmentCount = video.length;
+      task.segmentUrls = video.concat(audio);
       task.totalSegments = task.segmentUrls.length;
       if (task.totalSegments === 0) {
         throw new Error(t('errNoSegments'));
@@ -288,11 +294,21 @@ async function fetchAndParseM3u8Recursively(task, url, depth = 0) {
   const lines = text.split('\n');
   const segmentUrls = [];
   const masterPlaylists = [];
+  const audioRenditions = [];
   const baseUrl = url;
   
   let currentKey = null;
   let currentIv = null;
   let mediaSequence = 0;
+  // #EXT-X-BYTERANGE: segments are parts of one file. Without an offset a part follows the previous one of that file.
+  let pendingRange = null;
+  const rangeEnd = {};
+  const rangeOf = (spec, segUrl) => {
+    const [length, offset] = spec.split('@').map(Number);
+    const start = isNaN(offset) ? (rangeEnd[segUrl] || 0) : offset;
+    rangeEnd[segUrl] = start + length;
+    return [start, start + length - 1];
+  };
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i].trim();
@@ -334,6 +350,13 @@ async function fetchAndParseM3u8Recursively(task, url, depth = 0) {
         currentKey = null;
         currentIv = null;
       }
+    } else if (line.startsWith('#EXT-X-MEDIA:') && line.includes('TYPE=AUDIO')) {
+      const uriMatch = line.match(/URI="([^"]+)"/);
+      audioRenditions.push({
+        group: (line.match(/GROUP-ID="([^"]+)"/) || [])[1] || '',
+        url: uriMatch ? resolveUrl(baseUrl, uriMatch[1]) : null, // no URI: the audio is inside the variant
+        isDefault: /DEFAULT=YES/.test(line)
+      });
     } else if (line.startsWith('#EXT-X-STREAM-INF')) {
       let bandwidth = 0;
       const bwMatch = line.match(/BANDWIDTH=(\d+)/);
@@ -355,15 +378,21 @@ async function fetchAndParseM3u8Recursively(task, url, depth = 0) {
         masterPlaylists.push({
           url: resolveUrl(baseUrl, nextLine),
           bandwidth,
-          resolution: res
+          resolution: res,
+          codecs: (line.match(/CODECS="([^"]+)"/) || [])[1] || '',
+          audioGroup: (line.match(/AUDIO="([^"]+)"/) || [])[1] || ''
         });
       }
     } else if (line.startsWith('#EXT-X-MAP:')) {
       const match = line.match(/URI="([^"]+)"/);
       if (match) {
-        segmentUrls.push({ url: resolveUrl(baseUrl, match[1]), key: currentKey, iv: currentIv, seq: mediaSequence });
-        task.isFmp4 = true;
+        const segUrl = resolveUrl(baseUrl, match[1]);
+        const byteRange = line.match(/BYTERANGE="([^"]+)"/);
+        const range = byteRange ? rangeOf(byteRange[1], segUrl) : null;
+        segmentUrls.push({ url: segUrl, key: currentKey, iv: currentIv, seq: mediaSequence, init: true, range });
       }
+    } else if (line.startsWith('#EXT-X-BYTERANGE:')) {
+      pendingRange = line.substring('#EXT-X-BYTERANGE:'.length);
     } else if (!line.startsWith('#')) {
       let iv = currentIv;
       if (currentKey && !iv) {
@@ -371,7 +400,10 @@ async function fetchAndParseM3u8Recursively(task, url, depth = 0) {
         const view = new DataView(iv.buffer);
         view.setUint32(12, mediaSequence, false);
       }
-      segmentUrls.push({ url: resolveUrl(baseUrl, line), key: currentKey, iv: iv, seq: mediaSequence });
+      const segUrl = resolveUrl(baseUrl, line);
+      const range = pendingRange ? rangeOf(pendingRange, segUrl) : null;
+      pendingRange = null;
+      segmentUrls.push({ url: segUrl, key: currentKey, iv: iv, seq: mediaSequence, range });
       mediaSequence++;
     }
   }
@@ -391,6 +423,15 @@ async function fetchAndParseM3u8Recursively(task, url, depth = 0) {
         selectedPlaylist = match;
       }
     }
+    // The same video is often listed once per audio group: prefer AAC (AC-3 / E-AC-3 does not play everywhere)
+    const isDolby = (p) => /\b(ac-3|ec-3)\b/i.test(p.codecs);
+    if (isDolby(selectedPlaylist)) {
+      selectedPlaylist = masterPlaylists.find(p => p.url === selectedPlaylist.url && !isDolby(p)) || selectedPlaylist;
+    }
+    // The variant's audio group: its default rendition, else the first. One without URI means the variant has the audio.
+    const group = audioRenditions.filter(r => r.group === selectedPlaylist.audioGroup);
+    const audio = group.find(r => r.isDefault) || group[0];
+    task.audioPlaylistUrl = audio && audio.url ? audio.url : null;
     return fetchAndParseM3u8Recursively(task, selectedPlaylist.url, depth + 1);
   }
   return segmentUrls;
@@ -465,7 +506,8 @@ async function downloadWorker(task) {
         const segUrl = typeof seg === 'string' ? seg : seg.url;
         const segKey = typeof seg === 'string' ? null : seg.key;
         const segIv = typeof seg === 'string' ? null : seg.iv;
-        const buffer = await fetchSegment(task, segUrl, task.abortController.signal, segKey, segIv);
+        const segRange = typeof seg === 'string' ? null : seg.range;
+        const buffer = await fetchSegment(task, segUrl, task.abortController.signal, segKey, segIv, segRange);
         task.downloadedBuffers[nextIdx] = buffer;
         success = true;
         task.downloadedCount++;
@@ -572,8 +614,9 @@ function getNextIndex(task) {
 }
 
 // Fetch segment chunk and optionally decrypt
-async function fetchSegment(task, url, signal, key = null, iv = null) {
-  const response = await taskFetch(task, url, { signal });
+async function fetchSegment(task, url, signal, key = null, iv = null, range = null) {
+  const headers = range ? { Range: `bytes=${range[0]}-${range[1]}` } : undefined;
+  const response = await taskFetch(task, url, { signal, headers });
   if (!response.ok) {
     throw await httpError('', url, response);
   }
@@ -591,13 +634,17 @@ async function fetchSegment(task, url, signal, key = null, iv = null) {
     task.speedTracker.bytes += value.length;
   }
 
-  const combined = new Uint8Array(receivedLength);
+  let combined = new Uint8Array(receivedLength);
   let position = 0;
   for (let chunk of chunks) {
     combined.set(chunk, position);
     position += chunk.length;
   }
-  
+  // Server ignored the Range header and sent the whole file
+  if (range && response.status === 200 && receivedLength > range[1]) {
+    combined = combined.slice(range[0], range[1] + 1);
+  }
+
   if (key && iv) {
     try {
       const decrypted = await crypto.subtle.decrypt({ name: 'AES-CBC', iv: iv }, key, combined.buffer);
@@ -614,44 +661,19 @@ async function fetchSegment(task, url, signal, key = null, iv = null) {
 // Merge buffers and download
 // Merge buffers and download
 function mergeAndSaveTask(task) {
-  const validChunks = task.downloadedBuffers.filter(buf => buf !== null);
-  
-  let finalBlob;
-  let defaultExt = task.isFmp4 ? '.mp4' : '.mp4';
-  
-  // Use mux.js to properly remux TS into a valid MP4 container so it opens in all players
-  if (!task.isFmp4 && typeof muxjs !== 'undefined') {
+  const videoCount = task.videoSegmentCount || task.downloadedBuffers.length;
+  const validChunks = task.downloadedBuffers.slice(0, videoCount).filter(buf => buf !== null);
+  const audioChunks = task.downloadedBuffers.slice(videoCount).filter(buf => buf !== null);
+
+  let finalBlob = audioChunks.length ? withSeparateAudio(task, validChunks, audioChunks) : null;
+  let defaultExt = '.mp4';
+
+  if (finalBlob) {
+    // video and its separate audio in one MP4; when that failed, the video alone is saved below
+  } else if (!task.isFmp4 && typeof muxjs !== 'undefined') {
+    // Use mux.js to properly remux TS into a valid MP4 container so it opens in all players
     try {
-      const transmuxer = new muxjs.mp4.Transmuxer();
-      // Collects mux.js's fragments (kept as Blobs: Chrome can keep large Blobs on disk, and no single
-      // buffer the size of the whole video is ever allocated) and rebuilds them into a regular MP4
-      const mp4 = new FaststartMp4();
-      let initSegment = null;
-
-      transmuxer.on('data', (segment) => {
-        if (segment.initSegment && !initSegment) {
-          initSegment = segment.initSegment;
-          mp4.setInit(initSegment);
-        }
-        if (segment.data) {
-          mp4.addFragment(segment.data);
-        }
-      });
-      // Time span of the whole output (90kHz clock) for the file's duration
-      let firstPts = Infinity;
-      let lastPts = 0;
-      const onTiming = (info) => {
-        firstPts = Math.min(firstPts, info.start.pts);
-        lastPts = Math.max(lastPts, info.end.pts);
-      };
-      transmuxer.on('videoSegmentTimingInfo', onTiming);
-      transmuxer.on('audioSegmentTimingInfo', onTiming);
-
-      // Push and flush segment-by-segment so mux.js never holds the whole stream
-      for (let chunk of validChunks) {
-        transmuxer.push(new Uint8Array(chunk));
-        transmuxer.flush();
-      }
+      const { mp4, initSegment, firstPts, lastPts } = transmux(validChunks);
 
       if (mp4.fragments.length > 0) {
         try {
@@ -672,11 +694,8 @@ function mergeAndSaveTask(task) {
       defaultExt = '.ts';
     }
   } else if (task.isFmp4) {
-    // fMP4 HLS: the segments already are fragments of one MP4 (EXT-X-MAP init + moof/mdat)
-    const mp4 = new FaststartMp4();
-    validChunks.forEach(chunk => mp4.addSegment(chunk));
     try {
-      finalBlob = mp4.toBlob();
+      finalBlob = fmp4Of(validChunks).toBlob();
     } catch (err) {
       console.warn('Regular MP4 rebuild failed, saving fragmented MP4:', err);
       finalBlob = new Blob(validChunks, { type: 'video/mp4' });
@@ -719,6 +738,61 @@ function mergeAndSaveTask(task) {
   }, () => {
     if (chrome.runtime.lastError) { /* ignore */ }
   });
+}
+
+// One regular MP4 with the video's tracks and the audio track of the separate audio playlist (null if that failed)
+function withSeparateAudio(task, videoChunks, audioChunks) {
+  try {
+    const video = task.isFmp4 ? fmp4Of(videoChunks) : transmux(videoChunks).mp4;
+    if (video.hasTrack('soun')) return video.toBlob(); // the variant has its own sound after all
+    const audio = task.audioIsFmp4 ? fmp4Of(audioChunks) : transmux(audioChunks).mp4;
+    return FaststartMp4.combine([video, audio]);
+  } catch (err) {
+    console.warn('Adding the separate audio failed, saving the video only:', err);
+    return null;
+  }
+}
+
+// fMP4 HLS: the segments already are fragments of one MP4 (EXT-X-MAP init + moof/mdat)
+function fmp4Of(chunks) {
+  const mp4 = new FaststartMp4();
+  chunks.forEach(chunk => mp4.addSegment(chunk));
+  return mp4;
+}
+
+// TS (or raw AAC) segments -> mux.js fragments, collected for a regular MP4.
+// Fragments are kept as Blobs: Chrome can keep large Blobs on disk, and no single buffer
+// the size of the whole video is ever allocated.
+function transmux(chunks) {
+  const transmuxer = new muxjs.mp4.Transmuxer();
+  const mp4 = new FaststartMp4();
+  let initSegment = null;
+
+  transmuxer.on('data', (segment) => {
+    if (segment.initSegment && !initSegment) {
+      initSegment = segment.initSegment;
+      mp4.setInit(initSegment);
+    }
+    if (segment.data) {
+      mp4.addFragment(segment.data);
+    }
+  });
+  // Time span of the whole output (90kHz clock) for the file's duration
+  let firstPts = Infinity;
+  let lastPts = 0;
+  const onTiming = (info) => {
+    firstPts = Math.min(firstPts, info.start.pts);
+    lastPts = Math.max(lastPts, info.end.pts);
+  };
+  transmuxer.on('videoSegmentTimingInfo', onTiming);
+  transmuxer.on('audioSegmentTimingInfo', onTiming);
+
+  // Push and flush segment-by-segment so mux.js never holds the whole stream
+  for (let chunk of chunks) {
+    transmuxer.push(new Uint8Array(chunk));
+    transmuxer.flush();
+  }
+  return { mp4, initSegment, firstPts, lastPts };
 }
 
 // mux.js writes "unknown" (0xFFFFFFFF) durations into the init segment, so players guess the length

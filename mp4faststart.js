@@ -7,13 +7,14 @@
 //   mp4.setInit(initSegment);          // ftyp + moov (with mvex)
 //   mp4.addFragment(bytes);            // any number of moof + mdat pairs, in order
 //   const blob = mp4.toBlob();         // throws if the input could not be read: use mp4.fragmentBlobs()
+//   FaststartMp4.combine([video, audio]) // one MP4 with the tracks of several inputs (audio a stream keeps separately)
 
 class FaststartMp4 {
   constructor() {
     this.init = null;
-    this.tracks = {};      // { [trackId]: { timescale, durations, sizes, cts, syncs, chunks, nextDts } }
+    this.tracks = {};      // { [trackId]: { timescale, handler, durations, sizes, cts, syncs, chunks, firstDts, nextDts } }
     this.trex = {};        // { [trackId]: defaults for fragments }
-    this.chunks = [];      // mdat contents in file order: { track, blob, start, size, count }
+    this.chunks = [];      // mdat contents in file order: { track, blob, start, size, count, time (s from track start) }
     this.fragments = [];   // Blob of each fragment (fallback: fragmented MP4 as received)
     this.error = null;
   }
@@ -34,7 +35,9 @@ class FaststartMp4 {
         if (!tkhd || !mdhd) continue;
         const id = view.getUint32(tkhd.start + (view.getUint8(tkhd.start + 8) === 1 ? 28 : 20));
         const timescale = view.getUint32(mdhd.start + (view.getUint8(mdhd.start + 8) === 1 ? 28 : 20));
-        this.tracks[id] = { id, timescale, durations: [], sizes: [], cts: [], syncs: [], chunks: [], nextDts: null };
+        const hdlr = findPath(view, trak, ['mdia', 'hdlr']);
+        const handler = hdlr ? String.fromCharCode(...this.init.subarray(hdlr.start + 16, hdlr.start + 20)) : '';
+        this.tracks[id] = { id, timescale, handler, durations: [], sizes: [], cts: [], syncs: [], chunks: [], firstDts: null, nextDts: null };
       }
       const mvex = findBox(view, moov.body, moov.end, 'mvex');
       if (mvex) {
@@ -96,19 +99,21 @@ class FaststartMp4 {
         const dts = view.getUint8(tfdt.start + 8) === 1 ? Number(view.getBigUint64(tfdt.start + 12)) : view.getUint32(tfdt.start + 12);
         this.alignTo(track, dts);
       } else if (track.nextDts === null) {
-        track.nextDts = 0;
+        track.nextDts = track.firstDts = 0;
       }
 
+      let next = base; // a trun without data_offset continues after the previous one; with it, counts from base
       for (const trun of boxesOf(view, traf.body, traf.end, 'trun')) {
         const version = view.getUint8(trun.start + 8);
         const flags = view.getUint32(trun.start + 8) & 0xFFFFFF;
         const count = view.getUint32(trun.start + 12);
         let q = trun.start + 16;
-        let dataStart = base;
+        let dataStart = next;
         if (flags & 0x1) { dataStart = base + view.getInt32(q); q += 4; }
         let firstFlags = null;
         if (flags & 0x4) { firstFlags = view.getUint32(q); q += 4; }
 
+        const time = (track.nextDts - track.firstDts) / track.timescale;
         let size = 0;
         for (let i = 0; i < count; i++) {
           let d = defaults.duration, s = defaults.size, f = defaults.flags, c = 0;
@@ -126,10 +131,10 @@ class FaststartMp4 {
         }
         if (count === 0) continue;
         if (dataStart < 0 || dataStart + size > length) throw new Error('sample data outside the fragment');
-        const chunk = { track: id, blob, start: dataStart, size, count };
+        const chunk = { track: id, blob, start: dataStart, size, count, time };
         this.chunks.push(chunk);
         track.chunks.push(chunk);
-        base = prevEnd = dataStart + size;
+        next = prevEnd = dataStart + size;
       }
     }
   }
@@ -138,7 +143,7 @@ class FaststartMp4 {
   // Close gaps/overlaps between fragments by stretching/shrinking the previous sample.
   alignTo(track, dts) {
     if (track.nextDts === null) {
-      track.nextDts = dts;
+      track.nextDts = track.firstDts = dts;
       return;
     }
     const diff = dts - track.nextDts;
@@ -158,68 +163,97 @@ class FaststartMp4 {
     return this.init ? [this.init, ...this.fragments] : this.fragments;
   }
 
+  hasTrack(handler) {
+    return Object.values(this.tracks).some(t => t.handler === handler && t.sizes.length);
+  }
+
   toBlob() {
-    if (this.error) throw this.error;
-    if (!this.init) throw new Error('no init segment');
-    if (!this.chunks.length) throw new Error('no samples');
+    return FaststartMp4.combine([this]);
+  }
+
+  // One regular MP4 with the tracks of all inputs, e.g. a stream's video and the audio it keeps in a separate playlist.
+  // Each input's time starts at 0; chunks of different inputs are interleaved by time so players read nearby bytes.
+  static combine(parts) {
+    for (const p of parts) {
+      if (p.error) throw p.error;
+      if (!p.init) throw new Error('no init segment');
+      if (!p.chunks.length) throw new Error('no samples');
+    }
     const ftyp = box('ftyp', strBytes('isom'), u32(0x200), strBytes('isom'), strBytes('iso2'), strBytes('avc1'), strBytes('mp41'));
-    const mediaSize = this.chunks.reduce((sum, c) => sum + c.size, 0);
+    const chunks = parts.flatMap(p => p.chunks);
+    if (parts.length > 1) chunks.sort((a, b) => a.time - b.time); // stable: each track keeps its order
+    const mediaSize = chunks.reduce((sum, c) => sum + c.size, 0);
 
     // Chunk offsets depend on the moov size, which does not depend on their values (co64 is fixed size)
-    const placeholder = this.buildMoov();
+    const placeholder = buildMoov(parts);
     let offset = ftyp.byteLength + placeholder.byteLength + 16;
-    for (const c of this.chunks) {
+    for (const c of chunks) {
       c.offset = offset;
       offset += c.size;
     }
-    const moov = this.buildMoov();
+    const moov = buildMoov(parts);
     const mdatHeader = concat([u32(1), strBytes('mdat'), u64(16 + mediaSize)]);
-    return new Blob([ftyp, moov, mdatHeader, ...this.chunks.map(c => c.blob.slice(c.start, c.start + c.size))], { type: 'video/mp4' });
+    return new Blob([ftyp, moov, mdatHeader, ...chunks.map(c => c.blob.slice(c.start, c.start + c.size))], { type: 'video/mp4' });
   }
+}
 
-  // The init segment's moov without mvex, with durations and a sample table per track
-  buildMoov() {
-    const view = viewOf(this.init);
-    const moov = findBox(view, 0, this.init.byteLength, 'moov');
-    let movieScale = 90000;
-    const mvhd = findBox(view, moov.body, moov.end, 'mvhd');
-    if (mvhd) movieScale = view.getUint32(mvhd.start + (view.getUint8(mvhd.start + 8) === 1 ? 28 : 20));
-    const mediaDuration = (t) => t.durations.reduce((a, b) => a + b, 0);
-    const movieDuration = (t) => Math.round(mediaDuration(t) * movieScale / t.timescale);
-    const movieTotal = Math.max(0, ...Object.values(this.tracks).map(movieDuration));
+// The first input's moov without mvex, with every input's tracks (numbered 1..n), durations and a sample table per track
+function buildMoov(parts) {
+  const first = viewOf(parts[0].init);
+  const firstMoov = findBox(first, 0, parts[0].init.byteLength, 'moov');
+  let movieScale = 90000;
+  const mvhd = findBox(first, firstMoov.body, firstMoov.end, 'mvhd');
+  if (mvhd) movieScale = first.getUint32(mvhd.start + (first.getUint8(mvhd.start + 8) === 1 ? 28 : 20));
+  const mediaDuration = (t) => t.durations.reduce((a, b) => a + b, 0);
+  const movieDuration = (t) => Math.round(mediaDuration(t) * movieScale / t.timescale);
+  const tracks = parts.flatMap(p => Object.values(p.tracks)).filter(t => t.sizes.length);
+  const movieTotal = Math.max(0, ...tracks.map(movieDuration));
 
+  const out = [];
+  let nextId = 1;
+  parts.forEach((part, n) => {
+    const init = part.init;
+    const view = viewOf(init);
+    const moov = findBox(view, 0, init.byteLength, 'moov');
     let track = null;
-    const rebuild = (start, end) => {
-      const out = [];
+    const rebuild = (start, end, top) => {
+      const boxes = [];
       for (const b of boxesOf(view, start, end)) {
         if (b.type === 'mvex') continue;
+        if (top && n > 0 && b.type !== 'trak') continue; // movie-level boxes come from the first input
         if (b.type === 'trak') {
           const tkhd = findBox(view, b.body, b.end, 'tkhd');
           const id = view.getUint32(tkhd.start + (view.getUint8(tkhd.start + 8) === 1 ? 28 : 20));
-          track = this.tracks[id];
+          track = part.tracks[id];
           if (!track || !track.sizes.length) continue; // declared but no samples: drop the track
-          out.push(box('trak', ...rebuild(b.body, b.end)));
+          track.outId = nextId++;
+          boxes.push(box('trak', ...rebuild(b.body, b.end)));
         } else if (b.type === 'mdia' || b.type === 'minf') {
-          out.push(box(b.type, ...rebuild(b.body, b.end)));
+          boxes.push(box(b.type, ...rebuild(b.body, b.end)));
         } else if (b.type === 'stbl') {
           const stsd = findBox(view, b.body, b.end, 'stsd');
-          out.push(box('stbl', this.init.slice(stsd.start, stsd.end), ...sampleTable(track)));
+          boxes.push(box('stbl', init.slice(stsd.start, stsd.end), ...sampleTable(track)));
         } else if (b.type === 'mvhd') {
-          out.push(withField(this.init, b, 24, 32, movieTotal));
+          const copy = withField(init, b, 24, 32, movieTotal);
+          viewOf(copy).setUint32(copy.byteLength - 4, tracks.length + 1); // next_track_ID
+          boxes.push(copy);
         } else if (b.type === 'tkhd') {
-          out.push(withField(this.init, b, 28, 36, movieDuration(track)));
+          const copy = withField(init, b, 28, 36, movieDuration(track));
+          viewOf(copy).setUint32(copy[8] === 1 ? 28 : 20, track.outId);
+          boxes.push(copy);
         } else if (b.type === 'mdhd') {
-          out.push(withField(this.init, b, 24, 32, mediaDuration(track)));
+          boxes.push(withField(init, b, 24, 32, mediaDuration(track)));
         } else if (b.type === 'edts') {
-          out.push(withEditDurations(this.init, b, movieDuration(track)));
+          boxes.push(withEditDurations(init, b, movieDuration(track)));
         } else {
-          out.push(this.init.slice(b.start, b.end));
+          boxes.push(init.slice(b.start, b.end));
         }
       }
-      return out;
+      return boxes;
     };
-    return box('moov', ...rebuild(moov.body, moov.end));
-  }
+    out.push(...rebuild(moov.body, moov.end, true));
+  });
+  return box('moov', ...out);
 }
 
 // stts / ctts / stss / stsz / stsc / co64 of one track

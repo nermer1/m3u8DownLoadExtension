@@ -12,7 +12,8 @@ function pathKeyOf(url) {
 }
 
 // Parse playlist text into what we need to group streams.
-//   master: { kind, variants: [{ url, path, resolution, bandwidth }], resolutions }
+//   master: { kind, variants: [{ url, path, resolution, bandwidth }], resolutions, renditions: [path] }
+//           renditions = separate audio / subtitle playlists (#EXT-X-MEDIA URI) of the master
 //   media : { kind, fp, segments, duration }   fp = first segment path + segment count
 function parsePlaylist(text, baseUrl) {
   if (!text || !text.trim().startsWith('#EXTM3U')) return null;
@@ -22,7 +23,13 @@ function parsePlaylist(text, baseUrl) {
   };
 
   const variants = [];
+  const renditions = [];
   for (let i = 0; i < lines.length; i++) {
+    if (lines[i].startsWith('#EXT-X-MEDIA:')) {
+      const uri = lines[i].match(/URI="([^"]+)"/);
+      if (uri) renditions.push(pathKeyOf(resolve(uri[1])));
+      continue;
+    }
     if (!lines[i].startsWith('#EXT-X-STREAM-INF')) continue;
     const next = lines.slice(i + 1).find(l => !l.startsWith('#'));
     if (!next) continue;
@@ -39,7 +46,7 @@ function parsePlaylist(text, baseUrl) {
   if (variants.length > 0) {
     const resolutions = Array.from(new Set(variants.map(v => v.resolution).filter(Boolean)))
       .sort((a, b) => parseInt(b) - parseInt(a));
-    return { kind: 'master', variants, resolutions };
+    return { kind: 'master', variants, resolutions, renditions };
   }
 
   let duration = 0;
@@ -113,7 +120,8 @@ function formatSize(bytes) {
 //   info: { [url]: parsePlaylist() result | { kind: 'file', ext, size } }
 // Rules
 //   1. Same master (same variant set) / same media content (fp) / same path -> one entry, latest URL wins
-//   2. Media playlists referenced by a master are folded into that master (pick them via resolution)
+//   2. Media playlists referenced by a master are folded into that master (pick them via resolution;
+//      its separate audio playlists are added on download)
 //   3. TS segments are hidden when the tab has any playlist; otherwise one per folder
 //   4. Video files: one per path; 3+ different files in one folder are numbered fragments -> hidden
 // Returns { m3u8: [url], ts: [url], file: [url], meta: { [url]: { duration, resolutions, size, ext } } }
@@ -123,7 +131,10 @@ function collapseStreams(m3u8Urls, tsUrls, info, fileUrls = []) {
   const variantPaths = new Set();
   m3u8Urls.forEach(url => {
     const i = info[url];
-    if (i && i.kind === 'master') i.variants.forEach(v => variantPaths.add(v.path));
+    if (i && i.kind === 'master') {
+      i.variants.forEach(v => variantPaths.add(v.path));
+      (i.renditions || []).forEach(p => variantPaths.add(p));
+    }
   });
 
   const latest = new Map(); // identity -> url (Map keeps first-seen order, value is the newest URL)
@@ -194,7 +205,7 @@ function isBlockedUrl(url) {
 // Raw URLs that are shown as the same entry as `url` (same identity, or variants of that master)
 function relatedUrls(url, urls, info) {
   const i = info[url];
-  const variantPaths = new Set(i && i.kind === 'master' ? i.variants.map(v => v.path) : []);
+  const variantPaths = new Set(i && i.kind === 'master' ? i.variants.map(v => v.path).concat(i.renditions || []) : []);
   const id = identityOf(url, info);
   return urls.filter(u => u === url || identityOf(u, info) === id || variantPaths.has(pathKeyOf(u)));
 }

@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "MediaDown - HLS/MP4 Video Downloader",
-  "version": "1.5",
+  "version": "1.6",
   "description": "__MSG_appDesc__",
   "default_locale": "en",
   "permissions": [
