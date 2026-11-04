@@ -51,7 +51,7 @@
 
 ```bash
 mkdir -p dist
-git archive --format=zip -o dist/mediadown-1.2.zip v1.2
+git archive --format=zip -o dist/mediadown-1.4.zip v1.4
 ```
 
 - 태그 `v<버전>` 은 `manifest.json` 의 `version` 과 같아야 한다

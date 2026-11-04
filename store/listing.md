@@ -10,6 +10,7 @@
 
 - 새 항목 → `dist/mediadown-1.2.zip` 업로드
 - 업데이트(1.3) → 패키지 탭에서 `dist/mediadown-1.3.zip` 새 패키지 업로드 → 개인정보 보호 관행 탭에 `declarativeNetRequestWithHostAccess` 사유 추가 → 제출
+- 업데이트(1.4) → 패키지 탭에서 `dist/mediadown-1.4.zip` 새 패키지 업로드 → 제출 (권한 변경 없음, 1단계 체크 해제·자동 게시 체크 유지)
 
 ## 2. 스토어 등록정보
 
