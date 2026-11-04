@@ -1,0 +1,201 @@
+{
+  "appDesc": {
+    "message": "웹페이지에서 재생되는 HLS(.m3u8)·TS 스트림과 MP4·WebM 영상을 감지해 화질을 골라 한 파일로 저장합니다."
+  },
+  "urlPlaceholder": {
+    "message": "m3u8 · ts · mp4 주소를 직접 입력..."
+  },
+  "detectUrl": {
+    "message": "주소 감지"
+  },
+  "detectedStreams": {
+    "message": "감지된 미디어 스트림"
+  },
+  "rawToggleTitle": {
+    "message": "같은 영상으로 묶지 않고 감지된 주소를 모두 표시"
+  },
+  "rawToggle": {
+    "message": "모든 주소"
+  },
+  "clearListTitle": {
+    "message": "감지 목록 비우기"
+  },
+  "clearList": {
+    "message": "감지 비우기"
+  },
+  "waiting": {
+    "message": "스트림 감지 대기 중..."
+  },
+  "waitingHint": {
+    "message": "영상을 재생하면 자동으로 분석을 진행합니다."
+  },
+  "completed": {
+    "message": "완료"
+  },
+  "noCompleted": {
+    "message": "완료된 다운로드가 없습니다."
+  },
+  "hide": {
+    "message": "숨기기"
+  },
+  "show": {
+    "message": "보이기"
+  },
+  "clearAll": {
+    "message": "모두 비우기"
+  },
+  "unsupportedSite": {
+    "message": "이 사이트는 지원하지 않습니다"
+  },
+  "youtubeNotDetected": {
+    "message": "YouTube 영상은 감지·다운로드하지 않습니다."
+  },
+  "youtubeNotSupported": {
+    "message": "YouTube 영상은 지원하지 않습니다."
+  },
+  "remove": {
+    "message": "제거"
+  },
+  "confirmCancel": {
+    "message": "다운로드가 진행 중입니다. 취소하시겠습니까?"
+  },
+  "preview": {
+    "message": "미리보기 재생"
+  },
+  "rename": {
+    "message": "이름 수정"
+  },
+  "download": {
+    "message": "다운로드"
+  },
+  "pause": {
+    "message": "일시정지"
+  },
+  "resume": {
+    "message": "재개"
+  },
+  "cancel": {
+    "message": "취소"
+  },
+  "stateQueued": {
+    "message": "대기 중..."
+  },
+  "stateDownloading": {
+    "message": "다운로드 중..."
+  },
+  "stateParsing": {
+    "message": "재생목록 분석 중..."
+  },
+  "statePaused": {
+    "message": "일시정지됨"
+  },
+  "stateMerging": {
+    "message": "병합 중..."
+  },
+  "stateSaving": {
+    "message": "저장 대기 중..."
+  },
+  "stateDone": {
+    "message": "완료됨"
+  },
+  "stateError": {
+    "message": "에러"
+  },
+  "speedEta": {
+    "message": "$SPEED$ MB/s (남음: $ETA$)",
+    "placeholders": {
+      "speed": {
+        "content": "$1"
+      },
+      "eta": {
+        "content": "$2"
+      }
+    }
+  },
+  "segmentProgress": {
+    "message": "$DONE$ / $TOTAL$ 조각 | $SPEED$",
+    "placeholders": {
+      "done": {
+        "content": "$1"
+      },
+      "total": {
+        "content": "$2"
+      },
+      "speed": {
+        "content": "$3"
+      }
+    }
+  },
+  "invalidUrl": {
+    "message": "올바른 HTTP/HTTPS URL을 입력해주세요."
+  },
+  "removeFromHistory": {
+    "message": "이력에서 삭제"
+  },
+  "openFolder": {
+    "message": "폴더 열기"
+  },
+  "playVideo": {
+    "message": "동영상 재생"
+  },
+  "play": {
+    "message": "재생"
+  },
+  "fileMissing": {
+    "message": "파일을 찾을 수 없습니다. 이동했거나 삭제된 파일일 수 있습니다."
+  },
+  "confirmClearHistory": {
+    "message": "모든 다운로드 완료 이력을 비우시겠습니까? (실제 파일은 삭제되지 않습니다)"
+  },
+  "downloadFailed": {
+    "message": "다운로드 실패"
+  },
+  "saveError": {
+    "message": "저장 에러"
+  },
+  "downloadStartFailed": {
+    "message": "다운로드 시작 실패"
+  },
+  "webVideo": {
+    "message": "웹 비디오"
+  },
+  "errNoSegments": {
+    "message": "스트림에 유효한 비디오 조각이 없습니다."
+  },
+  "errCloudflare": {
+    "message": "사이트의 Cloudflare 보안 설정이 확장의 요청을 차단했습니다. 이 사이트는 다운로드를 지원하지 않습니다."
+  },
+  "errTokenExpired": {
+    "message": "주소의 인증 토큰이 만료됐을 수 있습니다. 페이지에서 영상을 다시 재생한 직후에 받아보세요."
+  },
+  "errRejected": {
+    "message": "쿠키와 원래 페이지 정보를 붙여 보냈지만 거부됐습니다. 사이트 보호 설정으로 막힌 것 같습니다."
+  },
+  "serverResponse": {
+    "message": "서버 응답"
+  },
+  "errTooDeep": {
+    "message": "M3U8 호출 깊이가 너무 깊습니다."
+  },
+  "playlistLoadFailed": {
+    "message": "재생목록 로드 실패"
+  },
+  "errNotM3u8": {
+    "message": "올바른 M3U8 형식의 파일이 아닙니다. 토큰이 만료되었거나 접근이 차단되었을 수 있습니다."
+  },
+  "errDrm": {
+    "message": "DRM 보호 영상은 지원하지 않습니다."
+  },
+  "keyLoadFailed": {
+    "message": "암호화 키 로드 실패"
+  },
+  "mergeFailed": {
+    "message": "병합 실패"
+  },
+  "segmentFailed": {
+    "message": "조각 다운로드 실패"
+  },
+  "errDecrypt": {
+    "message": "AES 복호화 실패"
+  }
+}

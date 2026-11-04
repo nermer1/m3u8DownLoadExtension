@@ -1,0 +1,201 @@
+{
+  "appDesc": {
+    "message": "偵測網頁中播放的 HLS (.m3u8)/TS 串流和 MP4/WebM 影片，選擇畫質後儲存為單一檔案。"
+  },
+  "urlPlaceholder": {
+    "message": "輸入 m3u8 · ts · mp4 網址..."
+  },
+  "detectUrl": {
+    "message": "偵測網址"
+  },
+  "detectedStreams": {
+    "message": "偵測到的媒體"
+  },
+  "rawToggleTitle": {
+    "message": "不按影片合併，顯示所有偵測到的網址"
+  },
+  "rawToggle": {
+    "message": "所有網址"
+  },
+  "clearListTitle": {
+    "message": "清除偵測清單"
+  },
+  "clearList": {
+    "message": "清除"
+  },
+  "waiting": {
+    "message": "正在等待串流..."
+  },
+  "waitingHint": {
+    "message": "播放影片後將自動偵測。"
+  },
+  "completed": {
+    "message": "已完成"
+  },
+  "noCompleted": {
+    "message": "沒有已完成的下載。"
+  },
+  "hide": {
+    "message": "隱藏"
+  },
+  "show": {
+    "message": "顯示"
+  },
+  "clearAll": {
+    "message": "全部清除"
+  },
+  "unsupportedSite": {
+    "message": "不支援此網站"
+  },
+  "youtubeNotDetected": {
+    "message": "不偵測或下載 YouTube 影片。"
+  },
+  "youtubeNotSupported": {
+    "message": "不支援 YouTube 影片。"
+  },
+  "remove": {
+    "message": "移除"
+  },
+  "confirmCancel": {
+    "message": "正在下載，要取消嗎？"
+  },
+  "preview": {
+    "message": "播放預覽"
+  },
+  "rename": {
+    "message": "重新命名"
+  },
+  "download": {
+    "message": "下載"
+  },
+  "pause": {
+    "message": "暫停"
+  },
+  "resume": {
+    "message": "繼續"
+  },
+  "cancel": {
+    "message": "取消"
+  },
+  "stateQueued": {
+    "message": "等待中..."
+  },
+  "stateDownloading": {
+    "message": "下載中..."
+  },
+  "stateParsing": {
+    "message": "正在解析播放清單..."
+  },
+  "statePaused": {
+    "message": "已暫停"
+  },
+  "stateMerging": {
+    "message": "合併中..."
+  },
+  "stateSaving": {
+    "message": "等待儲存..."
+  },
+  "stateDone": {
+    "message": "已完成"
+  },
+  "stateError": {
+    "message": "錯誤"
+  },
+  "speedEta": {
+    "message": "$SPEED$ MB/s (剩餘 $ETA$)",
+    "placeholders": {
+      "speed": {
+        "content": "$1"
+      },
+      "eta": {
+        "content": "$2"
+      }
+    }
+  },
+  "segmentProgress": {
+    "message": "$DONE$ / $TOTAL$ 個片段 | $SPEED$",
+    "placeholders": {
+      "done": {
+        "content": "$1"
+      },
+      "total": {
+        "content": "$2"
+      },
+      "speed": {
+        "content": "$3"
+      }
+    }
+  },
+  "invalidUrl": {
+    "message": "請輸入有效的 HTTP/HTTPS 網址。"
+  },
+  "removeFromHistory": {
+    "message": "從紀錄中刪除"
+  },
+  "openFolder": {
+    "message": "開啟資料夾"
+  },
+  "playVideo": {
+    "message": "播放影片"
+  },
+  "play": {
+    "message": "播放"
+  },
+  "fileMissing": {
+    "message": "找不到檔案，可能已被移動或刪除。"
+  },
+  "confirmClearHistory": {
+    "message": "要清除所有已完成的下載紀錄嗎？（不會刪除實際檔案）"
+  },
+  "downloadFailed": {
+    "message": "下載失敗"
+  },
+  "saveError": {
+    "message": "儲存錯誤"
+  },
+  "downloadStartFailed": {
+    "message": "無法開始下載"
+  },
+  "webVideo": {
+    "message": "網頁影片"
+  },
+  "errNoSegments": {
+    "message": "串流中沒有有效的影片片段。"
+  },
+  "errCloudflare": {
+    "message": "網站的 Cloudflare 安全設定封鎖了擴充功能的請求，不支援下載此網站。"
+  },
+  "errTokenExpired": {
+    "message": "網址中的驗證權杖可能已過期。請在頁面上重新播放影片後立即下載。"
+  },
+  "errRejected": {
+    "message": "已附上 Cookie 和原頁面資訊傳送，但仍被拒絕。可能被網站的保護設定封鎖。"
+  },
+  "serverResponse": {
+    "message": "伺服器回應"
+  },
+  "errTooDeep": {
+    "message": "M3U8 巢狀層級過深。"
+  },
+  "playlistLoadFailed": {
+    "message": "無法載入播放清單"
+  },
+  "errNotM3u8": {
+    "message": "不是有效的 M3U8 檔案。權杖可能已過期或存取遭封鎖。"
+  },
+  "errDrm": {
+    "message": "不支援受 DRM 保護的影片。"
+  },
+  "keyLoadFailed": {
+    "message": "無法載入加密金鑰"
+  },
+  "mergeFailed": {
+    "message": "合併失敗"
+  },
+  "segmentFailed": {
+    "message": "片段下載失敗"
+  },
+  "errDecrypt": {
+    "message": "AES 解密失敗"
+  }
+}

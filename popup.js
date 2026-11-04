@@ -1,4 +1,15 @@
+const t = (key, subs) => chrome.i18n.getMessage(key, subs);
+
+// Fills popup.html text from _locales/<browser language>/messages.json
+function localizeHtml() {
+  document.documentElement.lang = chrome.i18n.getUILanguage();
+  document.querySelectorAll('[data-i18n]').forEach(el => { el.textContent = t(el.dataset.i18n); });
+  document.querySelectorAll('[data-i18n-title]').forEach(el => { el.title = t(el.dataset.i18nTitle); });
+  document.querySelectorAll('[data-i18n-placeholder]').forEach(el => { el.placeholder = t(el.dataset.i18nPlaceholder); });
+}
+
 document.addEventListener('DOMContentLoaded', async () => {
+  localizeHtml();
   const streamsList = document.getElementById('streams-list');
   const totalCount = document.getElementById('total-count');
   const btnClear = document.getElementById('btn-clear');
@@ -247,8 +258,8 @@ document.addEventListener('DOMContentLoaded', async () => {
       streamsList.innerHTML = `
       <div class="empty-state">
         <svg viewBox="0 0 24 24" class="empty-icon"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zM4 12c0-4.42 3.58-8 8-8 1.85 0 3.55.63 4.9 1.69L5.69 16.9A7.902 7.902 0 0 1 4 12zm8 8c-1.85 0-3.55-.63-4.9-1.69L18.31 7.1A7.902 7.902 0 0 1 20 12c0 4.42-3.58 8-8 8z"/></svg>
-        <p>이 사이트는 지원하지 않습니다</p>
-        <span>YouTube 영상은 감지·다운로드하지 않습니다.</span>
+        <p>${t('unsupportedSite')}</p>
+        <span>${t('youtubeNotDetected')}</span>
       </div>
     `;
       return;
@@ -257,8 +268,8 @@ document.addEventListener('DOMContentLoaded', async () => {
       <div class="empty-state">
         <div class="pulse-ring"></div>
         <svg viewBox="0 0 24 24" class="empty-icon"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 17h-2v-2h2v2zm2.07-7.75l-.9.92C13.45 12.9 13 13.5 13 15h-2v-.5c0-1.1.45-2.1 1.17-2.83l1.24-1.26c.37-.36.59-.86.59-1.41 0-1.1-.9-2-2-2s-2 .9-2 2H7c0-2.76 2.24-5 5-5s5 2.24 5 5c0 1.04-.42 1.99-1.07 2.75z"/></svg>
-        <p>스트림 감지 대기 중...</p>
-        <span>영상을 재생하면 자동으로 분석을 진행합니다.</span>
+        <p>${t('waiting')}</p>
+        <span>${t('waitingHint')}</span>
       </div>
     `;
   }
@@ -442,11 +453,11 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Dismiss button
     const btnDismiss = document.createElement('button');
     btnDismiss.className = 'card-close-btn';
-    btnDismiss.title = '제거';
+    btnDismiss.title = t('remove');
     btnDismiss.innerHTML = '&times;';
     btnDismiss.addEventListener('click', () => {
       if (isDownloading) {
-        if (confirm('다운로드가 진행 중입니다. 취소하시겠습니까?')) {
+        if (confirm(t('confirmCancel'))) {
           chrome.runtime.sendMessage({ action: 'cancelDownload', taskId: activeTask.id }, () => {
             if (chrome.runtime.lastError) { /* ignore */ }
           });
@@ -475,7 +486,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     
     // Add Preview Functionality
     thumbWrapper.style.cursor = 'pointer';
-    thumbWrapper.title = '미리보기 재생';
+    thumbWrapper.title = t('preview');
     thumbWrapper.addEventListener('click', () => {
       if (thumbWrapper.querySelector('video')) return;
       
@@ -569,7 +580,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Edit pencil button
     const btnEdit = document.createElement('button');
     btnEdit.className = 'btn-card-edit';
-    btnEdit.title = '이름 수정';
+    btnEdit.title = t('rename');
     btnEdit.innerHTML = `<svg viewBox="0 0 24 24"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>`;
     
     btnEdit.addEventListener('click', () => {
@@ -616,7 +627,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Download Button
     const btnDownload = document.createElement('button');
     btnDownload.className = 'btn-card-download';
-    btnDownload.innerHTML = `<svg viewBox="0 0 24 24"><path d="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96zM17 13l-5 5-5-5h3V9h4v4h3z"/></svg>다운로드`;
+    btnDownload.innerHTML = `<svg viewBox="0 0 24 24"><path d="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96zM17 13l-5 5-5-5h3V9h4v4h3z"/></svg>${t('download')}`;
     
     btnDownload.addEventListener('click', () => {
       const freshGroup = getFreshGroup();
@@ -675,7 +686,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     const stateText = document.createElement('span');
     stateText.className = 'progress-state-text';
-    stateText.textContent = '대기 중...';
+    stateText.textContent = t('stateQueued');
     infoRow.appendChild(stateText);
 
     const percentText = document.createElement('span');
@@ -705,7 +716,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     const btnPauseTask = document.createElement('button');
     btnPauseTask.className = 'btn-mini-action pause-btn';
-    btnPauseTask.textContent = '일시정지';
+    btnPauseTask.textContent = t('pause');
     
     // Toggle pause/resume in background
     btnPauseTask.addEventListener('click', () => {
@@ -713,11 +724,11 @@ document.addEventListener('DOMContentLoaded', async () => {
       if (activeTask) {
         if (activeTask.state === 'downloading') {
           chrome.runtime.sendMessage({ action: 'pauseDownload', taskId }, () => {
-            btnPauseTask.textContent = '재개';
+            btnPauseTask.textContent = t('resume');
           });
         } else if (activeTask.state === 'paused') {
           chrome.runtime.sendMessage({ action: 'startDownload', taskId, url: activeTask.url, title: activeTask.title, type: activeTask.type, resolution: activeTask.resolution }, () => {
-            btnPauseTask.textContent = '일시정지';
+            btnPauseTask.textContent = t('pause');
           });
         }
       }
@@ -725,7 +736,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     const btnCancelTask = document.createElement('button');
     btnCancelTask.className = 'btn-mini-action cancel';
-    btnCancelTask.textContent = '취소';
+    btnCancelTask.textContent = t('cancel');
     btnCancelTask.addEventListener('click', () => {
       chrome.runtime.sendMessage({ action: 'cancelDownload', taskId }, () => {
         if (chrome.runtime.lastError) { /* ignore */ }
@@ -764,25 +775,25 @@ document.addEventListener('DOMContentLoaded', async () => {
     const btnPauseTask = layout.querySelector('.pause-btn');
 
     // State mapping
-    let stateLabel = '다운로드 중...';
-    if (task.state === 'parsing') stateLabel = '재생목록 분석 중...';
+    let stateLabel = t('stateDownloading');
+    if (task.state === 'parsing') stateLabel = t('stateParsing');
     else if (task.state === 'paused') {
-      stateLabel = '일시정지됨';
-      if (btnPauseTask) btnPauseTask.textContent = '재개';
+      stateLabel = t('statePaused');
+      if (btnPauseTask) btnPauseTask.textContent = t('resume');
     } else if (task.state === 'merging') {
-      stateLabel = '병합 중...';
+      stateLabel = t('stateMerging');
     } else if (task.state === 'saving') {
-      stateLabel = '저장 대기 중...';
+      stateLabel = t('stateSaving');
     } else if (task.state === 'completed') {
-      stateLabel = '완료됨';
+      stateLabel = t('stateDone');
       delete activeDownloads[task.id];
       // Rerender lists to clean card and add to completed history
       loadStreams();
       loadCompletedHistory();
       return;
     } else if (task.state === 'error') {
-      stateLabel = '에러';
-      alert(`다운로드 실패: ${task.errorMsg}`);
+      stateLabel = t('stateError');
+      alert(`${t('downloadFailed')}: ${task.errorMsg}`);
       chrome.runtime.sendMessage({ action: 'cancelDownload', taskId: task.id }, () => {
         if (chrome.runtime.lastError) { /* ignore */ }
       });
@@ -794,10 +805,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (progressFill) progressFill.style.width = `${task.progress}%`;
     
     if (statText) {
-      const speed = `${(task.speed || 0).toFixed(1)} MB/s (남음: ${task.eta})`;
+      const speed = t('speedEta', [(task.speed || 0).toFixed(1), task.eta]);
       statText.textContent = task.type === 'file'
         ? `${formatSize(task.bytesReceived) || '0 KB'} / ${formatSize(task.totalBytes) || '?'} | ${speed}`
-        : `${task.downloadedCount} / ${task.totalSegments} 조각 | ${speed}`;
+        : t('segmentProgress', [String(task.downloadedCount), String(task.totalSegments), speed]);
     }
   }
 
@@ -838,7 +849,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (!url) return;
 
     if (!url.startsWith('http://') && !url.startsWith('https://')) {
-      alert('올바른 HTTP/HTTPS URL을 입력해주세요.');
+      alert(t('invalidUrl'));
       return;
     }
 
@@ -854,7 +865,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     // We can add a 'addManualStream' message in background.js.
     chrome.runtime.sendMessage({ action: 'addManualStream', tabId: activeTabId, url, type }, (response) => {
       if (response && response.error === 'blocked') {
-        alert('YouTube 영상은 지원하지 않습니다.');
+        alert(t('youtubeNotSupported'));
         return;
       }
       loadStreams();
@@ -902,7 +913,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   function renderCompletedList(list) {
     if (list.length === 0) {
-      completedList.innerHTML = `<div class="completed-empty">완료된 다운로드가 없습니다.</div>`;
+      completedList.innerHTML = `<div class="completed-empty">${t('noCompleted')}</div>`;
       return;
     }
 
@@ -931,7 +942,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       // Trash Button
       const btnTrash = document.createElement('button');
       btnTrash.className = 'btn-comp-icon delete';
-      btnTrash.title = '이력에서 삭제';
+      btnTrash.title = t('removeFromHistory');
       btnTrash.innerHTML = `<svg viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>`;
       btnTrash.addEventListener('click', () => {
         deleteFromCompletedHistory(item.id);
@@ -941,7 +952,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       // Folder Button
       const btnFolder = document.createElement('button');
       btnFolder.className = 'btn-comp-icon';
-      btnFolder.title = '폴더 열기';
+      btnFolder.title = t('openFolder');
       btnFolder.innerHTML = `<svg viewBox="0 0 24 24"><path d="M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></svg>`;
       btnFolder.addEventListener('click', () => {
         // Unknown file (moved / removed from Chrome's list): open the downloads folder instead
@@ -953,11 +964,11 @@ document.addEventListener('DOMContentLoaded', async () => {
       // Play Button
       const btnPlay = document.createElement('button');
       btnPlay.className = 'btn-comp-play';
-      btnPlay.title = '동영상 재생';
-      btnPlay.innerHTML = `<svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>재생`;
+      btnPlay.title = t('playVideo');
+      btnPlay.innerHTML = `<svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>${t('play')}`;
       btnPlay.addEventListener('click', () => {
         if (item.downloadId == null) {
-          alert('파일을 찾을 수 없습니다. 이동했거나 삭제된 파일일 수 있습니다.');
+          alert(t('fileMissing'));
           return;
         }
         chrome.downloads.open(item.downloadId);
@@ -984,15 +995,15 @@ document.addEventListener('DOMContentLoaded', async () => {
   btnHideHistory.addEventListener('click', () => {
     if (completedList.style.display === 'none') {
       completedList.style.display = 'flex';
-      btnHideHistory.textContent = '숨기기';
+      btnHideHistory.textContent = t('hide');
     } else {
       completedList.style.display = 'none';
-      btnHideHistory.textContent = '보이기';
+      btnHideHistory.textContent = t('show');
     }
   });
 
   btnClearHistory.addEventListener('click', () => {
-    if (confirm('모든 다운로드 완료 이력을 비우시겠습니까? (실제 파일은 삭제되지 않습니다)')) {
+    if (confirm(t('confirmClearHistory'))) {
       chrome.storage.local.set({ completedDownloads: [] }, () => {
         loadCompletedHistory();
       });

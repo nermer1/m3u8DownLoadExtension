@@ -1,0 +1,201 @@
+{
+  "appDesc": {
+    "message": "Detects HLS (.m3u8)/TS streams and MP4/WebM videos playing on a page and saves them as one file in the quality you choose."
+  },
+  "urlPlaceholder": {
+    "message": "Enter an m3u8 · ts · mp4 URL..."
+  },
+  "detectUrl": {
+    "message": "Detect URL"
+  },
+  "detectedStreams": {
+    "message": "Detected media"
+  },
+  "rawToggleTitle": {
+    "message": "Show every detected URL without grouping by video"
+  },
+  "rawToggle": {
+    "message": "All URLs"
+  },
+  "clearListTitle": {
+    "message": "Clear the detected list"
+  },
+  "clearList": {
+    "message": "Clear"
+  },
+  "waiting": {
+    "message": "Waiting for streams..."
+  },
+  "waitingHint": {
+    "message": "Play a video and it will be detected automatically."
+  },
+  "completed": {
+    "message": "Completed"
+  },
+  "noCompleted": {
+    "message": "No completed downloads."
+  },
+  "hide": {
+    "message": "Hide"
+  },
+  "show": {
+    "message": "Show"
+  },
+  "clearAll": {
+    "message": "Clear all"
+  },
+  "unsupportedSite": {
+    "message": "This site is not supported"
+  },
+  "youtubeNotDetected": {
+    "message": "YouTube videos are not detected or downloaded."
+  },
+  "youtubeNotSupported": {
+    "message": "YouTube videos are not supported."
+  },
+  "remove": {
+    "message": "Remove"
+  },
+  "confirmCancel": {
+    "message": "A download is in progress. Cancel it?"
+  },
+  "preview": {
+    "message": "Play preview"
+  },
+  "rename": {
+    "message": "Rename"
+  },
+  "download": {
+    "message": "Download"
+  },
+  "pause": {
+    "message": "Pause"
+  },
+  "resume": {
+    "message": "Resume"
+  },
+  "cancel": {
+    "message": "Cancel"
+  },
+  "stateQueued": {
+    "message": "Waiting..."
+  },
+  "stateDownloading": {
+    "message": "Downloading..."
+  },
+  "stateParsing": {
+    "message": "Reading playlist..."
+  },
+  "statePaused": {
+    "message": "Paused"
+  },
+  "stateMerging": {
+    "message": "Merging..."
+  },
+  "stateSaving": {
+    "message": "Waiting to save..."
+  },
+  "stateDone": {
+    "message": "Done"
+  },
+  "stateError": {
+    "message": "Error"
+  },
+  "speedEta": {
+    "message": "$SPEED$ MB/s ($ETA$ left)",
+    "placeholders": {
+      "speed": {
+        "content": "$1"
+      },
+      "eta": {
+        "content": "$2"
+      }
+    }
+  },
+  "segmentProgress": {
+    "message": "$DONE$ / $TOTAL$ segments | $SPEED$",
+    "placeholders": {
+      "done": {
+        "content": "$1"
+      },
+      "total": {
+        "content": "$2"
+      },
+      "speed": {
+        "content": "$3"
+      }
+    }
+  },
+  "invalidUrl": {
+    "message": "Enter a valid HTTP/HTTPS URL."
+  },
+  "removeFromHistory": {
+    "message": "Remove from history"
+  },
+  "openFolder": {
+    "message": "Show in folder"
+  },
+  "playVideo": {
+    "message": "Play video"
+  },
+  "play": {
+    "message": "Play"
+  },
+  "fileMissing": {
+    "message": "File not found. It may have been moved or deleted."
+  },
+  "confirmClearHistory": {
+    "message": "Clear all completed downloads from the list? (The files themselves are not deleted.)"
+  },
+  "downloadFailed": {
+    "message": "Download failed"
+  },
+  "saveError": {
+    "message": "Save error"
+  },
+  "downloadStartFailed": {
+    "message": "Could not start the download"
+  },
+  "webVideo": {
+    "message": "Web video"
+  },
+  "errNoSegments": {
+    "message": "The stream has no valid video segments."
+  },
+  "errCloudflare": {
+    "message": "The site's Cloudflare security blocked the extension's request. This site cannot be downloaded."
+  },
+  "errTokenExpired": {
+    "message": "The token in the URL may have expired. Play the video on the page again and download right after."
+  },
+  "errRejected": {
+    "message": "Rejected even with cookies and the original page info. The site's protection seems to be blocking it."
+  },
+  "serverResponse": {
+    "message": "Server response"
+  },
+  "errTooDeep": {
+    "message": "Too many nested M3U8 playlists."
+  },
+  "playlistLoadFailed": {
+    "message": "Could not load the playlist"
+  },
+  "errNotM3u8": {
+    "message": "Not a valid M3U8 file. The token may have expired or access may be blocked."
+  },
+  "errDrm": {
+    "message": "DRM-protected videos are not supported."
+  },
+  "keyLoadFailed": {
+    "message": "Could not load the encryption key"
+  },
+  "mergeFailed": {
+    "message": "Merge failed"
+  },
+  "segmentFailed": {
+    "message": "Segment download failed"
+  },
+  "errDecrypt": {
+    "message": "AES decryption failed"
+  }
+}

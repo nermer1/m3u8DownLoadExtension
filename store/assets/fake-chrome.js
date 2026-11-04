@@ -1,7 +1,14 @@
 // Fake chrome.* API + sample data so the real popup can be rendered for store screenshots.
-//   popup-demo.html?scene=list | downloading | youtube
+//   popup-demo.html?scene=list | downloading | youtube &lang=ko | en | ja | zh_CN | zh_TW
 (function () {
-  const scene = new URLSearchParams(location.search).get('scene') || 'list';
+  const params = new URLSearchParams(location.search);
+  const scene = params.get('scene') || 'list';
+  const lang = params.get('lang') || 'ko';
+  // popup.js reads texts synchronously, so load the language file before it runs
+  const xhr = new XMLHttpRequest();
+  xhr.open('GET', '../../_locales/' + lang + '/messages.json', false);
+  xhr.send();
+  const messages = JSON.parse(xhr.responseText);
   const HLS = 'https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8';
   const FILE = 'https://upload.wikimedia.org/wikipedia/commons/sample/Big_Buck_Bunny.webm';
   const tab = scene === 'youtube'
@@ -47,6 +54,20 @@
       },
       onChanged: { addListener() {} }
     },
-    downloads: { search: async () => [{ id: 1 }], show() {}, open() {}, showDefaultFolder() {} }
+    downloads: { search: async () => [{ id: 1 }], show() {}, open() {}, showDefaultFolder() {} },
+    i18n: {
+      getUILanguage: () => lang.replace('_', '-'),
+      // Same rules as Chrome: $NAME$ -> placeholder content, then $1..$9 -> substitutions
+      getMessage(key, subs) {
+        const m = messages[key];
+        if (!m) return '';
+        subs = subs == null ? [] : [].concat(subs);
+        let text = m.message.replace(/\$(\w+)\$/g, (s, name) => {
+          const p = m.placeholders && m.placeholders[name.toLowerCase()];
+          return p ? p.content : s;
+        });
+        return text.replace(/\$(\d)/g, (s, n) => subs[n - 1] != null ? String(subs[n - 1]) : '');
+      }
+    }
   };
 })();

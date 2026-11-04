@@ -1,0 +1,201 @@
+{
+  "appDesc": {
+    "message": "检测网页中播放的 HLS (.m3u8)/TS 视频流和 MP4/WebM 视频，选择画质后保存为单个文件。"
+  },
+  "urlPlaceholder": {
+    "message": "输入 m3u8 · ts · mp4 地址..."
+  },
+  "detectUrl": {
+    "message": "检测地址"
+  },
+  "detectedStreams": {
+    "message": "检测到的媒体"
+  },
+  "rawToggleTitle": {
+    "message": "不按视频合并，显示所有检测到的地址"
+  },
+  "rawToggle": {
+    "message": "所有地址"
+  },
+  "clearListTitle": {
+    "message": "清空检测列表"
+  },
+  "clearList": {
+    "message": "清空"
+  },
+  "waiting": {
+    "message": "正在等待视频流..."
+  },
+  "waitingHint": {
+    "message": "播放视频后将自动检测。"
+  },
+  "completed": {
+    "message": "已完成"
+  },
+  "noCompleted": {
+    "message": "暂无已完成的下载。"
+  },
+  "hide": {
+    "message": "隐藏"
+  },
+  "show": {
+    "message": "显示"
+  },
+  "clearAll": {
+    "message": "全部清空"
+  },
+  "unsupportedSite": {
+    "message": "不支持此网站"
+  },
+  "youtubeNotDetected": {
+    "message": "不检测或下载 YouTube 视频。"
+  },
+  "youtubeNotSupported": {
+    "message": "不支持 YouTube 视频。"
+  },
+  "remove": {
+    "message": "移除"
+  },
+  "confirmCancel": {
+    "message": "正在下载，要取消吗？"
+  },
+  "preview": {
+    "message": "播放预览"
+  },
+  "rename": {
+    "message": "重命名"
+  },
+  "download": {
+    "message": "下载"
+  },
+  "pause": {
+    "message": "暂停"
+  },
+  "resume": {
+    "message": "继续"
+  },
+  "cancel": {
+    "message": "取消"
+  },
+  "stateQueued": {
+    "message": "等待中..."
+  },
+  "stateDownloading": {
+    "message": "下载中..."
+  },
+  "stateParsing": {
+    "message": "正在解析播放列表..."
+  },
+  "statePaused": {
+    "message": "已暂停"
+  },
+  "stateMerging": {
+    "message": "合并中..."
+  },
+  "stateSaving": {
+    "message": "等待保存..."
+  },
+  "stateDone": {
+    "message": "已完成"
+  },
+  "stateError": {
+    "message": "错误"
+  },
+  "speedEta": {
+    "message": "$SPEED$ MB/s (剩余 $ETA$)",
+    "placeholders": {
+      "speed": {
+        "content": "$1"
+      },
+      "eta": {
+        "content": "$2"
+      }
+    }
+  },
+  "segmentProgress": {
+    "message": "$DONE$ / $TOTAL$ 个分片 | $SPEED$",
+    "placeholders": {
+      "done": {
+        "content": "$1"
+      },
+      "total": {
+        "content": "$2"
+      },
+      "speed": {
+        "content": "$3"
+      }
+    }
+  },
+  "invalidUrl": {
+    "message": "请输入有效的 HTTP/HTTPS 地址。"
+  },
+  "removeFromHistory": {
+    "message": "从记录中删除"
+  },
+  "openFolder": {
+    "message": "打开文件夹"
+  },
+  "playVideo": {
+    "message": "播放视频"
+  },
+  "play": {
+    "message": "播放"
+  },
+  "fileMissing": {
+    "message": "找不到文件，可能已被移动或删除。"
+  },
+  "confirmClearHistory": {
+    "message": "要清空所有已完成的下载记录吗？（不会删除实际文件）"
+  },
+  "downloadFailed": {
+    "message": "下载失败"
+  },
+  "saveError": {
+    "message": "保存出错"
+  },
+  "downloadStartFailed": {
+    "message": "无法开始下载"
+  },
+  "webVideo": {
+    "message": "网页视频"
+  },
+  "errNoSegments": {
+    "message": "视频流中没有有效的视频分片。"
+  },
+  "errCloudflare": {
+    "message": "网站的 Cloudflare 安全设置拦截了扩展的请求，不支持下载此网站。"
+  },
+  "errTokenExpired": {
+    "message": "地址中的认证令牌可能已过期。请在页面上重新播放视频后立即下载。"
+  },
+  "errRejected": {
+    "message": "已附带 Cookie 和原页面信息发送，但仍被拒绝。可能被网站的保护设置拦截。"
+  },
+  "serverResponse": {
+    "message": "服务器响应"
+  },
+  "errTooDeep": {
+    "message": "M3U8 嵌套层级过深。"
+  },
+  "playlistLoadFailed": {
+    "message": "无法加载播放列表"
+  },
+  "errNotM3u8": {
+    "message": "不是有效的 M3U8 文件。令牌可能已过期或访问被拦截。"
+  },
+  "errDrm": {
+    "message": "不支持受 DRM 保护的视频。"
+  },
+  "keyLoadFailed": {
+    "message": "无法加载加密密钥"
+  },
+  "mergeFailed": {
+    "message": "合并失败"
+  },
+  "segmentFailed": {
+    "message": "分片下载失败"
+  },
+  "errDecrypt": {
+    "message": "AES 解密失败"
+  }
+}

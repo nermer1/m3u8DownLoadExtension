@@ -25,8 +25,8 @@
       <!-- Section: Manual URL Input -->
       <section class="manual-input-box">
         <div class="input-wrapper">
-          <input type="text" id="manual-url" placeholder="m3u8 · ts · mp4 주소를 직접 입력..." autocomplete="off">
-          <button id="btn-manual-download" title="주소 감지">
+          <input type="text" id="manual-url" data-i18n-placeholder="urlPlaceholder" autocomplete="off">
+          <button id="btn-manual-download" data-i18n-title="detectUrl">
             <svg viewBox="0 0 24 24" class="icon-svg"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 17h-2v-2h2v2zm2.07-7.75l-.9.92C13.45 12.9 13 13.5 13 15h-2v-.5c0-1.1.45-2.1 1.17-2.83l1.24-1.26c.37-.36.59-.86.59-1.41 0-1.1-.9-2-2-2s-2 .9-2 2H7c0-2.76 2.24-5 5-5s5 2.24 5 5c0 1.04-.42 1.99-1.07 2.75z"/></svg>
           </button>
         </div>
@@ -35,12 +35,12 @@
       <!-- Section: Active Stream list -->
       <section class="streams-section">
         <div class="section-header">
-          <h2>감지된 미디어 스트림 <span id="total-count" class="badge">0</span></h2>
+          <h2><span data-i18n="detectedStreams"></span> <span id="total-count" class="badge">0</span></h2>
           <div class="section-tools">
-            <label class="raw-toggle" title="같은 영상으로 묶지 않고 감지된 주소를 모두 표시">
-              <input type="checkbox" id="raw-toggle"> 모든 주소
+            <label class="raw-toggle" data-i18n-title="rawToggleTitle">
+              <input type="checkbox" id="raw-toggle"> <span data-i18n="rawToggle"></span>
             </label>
-            <button id="btn-clear" class="btn-text" title="감지 목록 비우기">감지 비우기</button>
+            <button id="btn-clear" class="btn-text" data-i18n-title="clearListTitle" data-i18n="clearList"></button>
           </div>
         </div>
         
@@ -49,18 +49,18 @@
           <div class="empty-state">
             <div class="pulse-ring"></div>
             <svg viewBox="0 0 24 24" class="empty-icon"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 17h-2v-2h2v2zm2.07-7.75l-.9.92C13.45 12.9 13 13.5 13 15h-2v-.5c0-1.1.45-2.1 1.17-2.83l1.24-1.26c.37-.36.59-.86.59-1.41 0-1.1-.9-2-2-2s-2 .9-2 2H7c0-2.76 2.24-5 5-5s5 2.24 5 5c0 1.04-.42 1.99-1.07 2.75z"/></svg>
-            <p>스트림 감지 대기 중...</p>
-            <span>영상을 재생하면 자동으로 분석을 진행합니다.</span>
+            <p data-i18n="waiting"></p>
+            <span data-i18n="waitingHint"></span>
           </div>
         </div>
       </section>
 
       <!-- Section: Completed List -->
       <section class="completed-section" id="completed-section">
-        <div class="divider-text"><span>완료</span></div>
+        <div class="divider-text"><span data-i18n="completed"></span></div>
         <div id="completed-list" class="completed-list">
           <!-- Dynamically populated completed items -->
-          <div class="completed-empty">완료된 다운로드가 없습니다.</div>
+          <div class="completed-empty" data-i18n="noCompleted"></div>
         </div>
       </section>
     </main>
@@ -68,10 +68,10 @@
     <!-- Footer -->
     <footer class="app-footer">
       <div class="footer-links">
-        <button id="btn-hide-history" class="btn-text-link">숨기기</button>
-        <button id="btn-clear-history" class="btn-text-link">모두 비우기</button>
+        <button id="btn-hide-history" class="btn-text-link" data-i18n="hide"></button>
+        <button id="btn-clear-history" class="btn-text-link" data-i18n="clearAll"></button>
       </div>
-      <p>MediaDown v1.4 • Chrome MV3</p>
+      <p>MediaDown v1.5 • Chrome MV3</p>
     </footer>
   </div>
   <script src="hls.min.js"></script>

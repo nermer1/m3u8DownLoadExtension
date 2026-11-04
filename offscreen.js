@@ -1,11 +1,16 @@
 // Offscreen Downloader Engine
 const activeTasks = {};
 
+// Error texts in the browser language: offscreen documents can only use chrome.runtime, so background sends them
+let messages = {};
+const t = key => messages[key] || key;
+
 // Handle incoming messages from background script
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   const { action, taskId, url, title, type, resolution, downloadId, errorMsg } = message;
 
   if (action === 'START_DOWNLOAD') {
+    if (message.messages) messages = message.messages;
     startTask(taskId, url, title, type, resolution, message.pageHeaders);
     sendResponse({ success: true });
   } else if (action === 'PAUSE_DOWNLOAD') {
@@ -92,7 +97,7 @@ async function startTask(taskId, url, title, type, resolution, pageHeaders) {
       task.segmentUrls = await fetchAndParseM3u8Recursively(task, targetUrl);
       task.totalSegments = task.segmentUrls.length;
       if (task.totalSegments === 0) {
-        throw new Error('스트림에 유효한 비디오 조각이 없습니다.');
+        throw new Error(t('errNoSegments'));
       }
       task.downloadedBuffers = new Array(task.totalSegments).fill(null);
     } else {
@@ -223,15 +228,15 @@ async function httpError(what, url, response) {
   if (response.status === 401 || response.status === 403) {
     const tokenLike = /[?&](expires?|exp|e|token|tk|sig|signature|hdnts|hdntl|policy|key-pair-id|st|auth|hash|md5)=/i.test(url);
     if (cloudflare) {
-      msg += ' — 사이트의 Cloudflare 보안 설정이 확장의 요청을 차단했습니다. 이 사이트는 다운로드를 지원하지 않습니다.';
+      msg += ' — ' + t('errCloudflare');
     } else if (tokenLike) {
-      msg += ' — 주소의 인증 토큰이 만료됐을 수 있습니다. 페이지에서 영상을 다시 재생한 직후에 받아보세요.';
+      msg += ' — ' + t('errTokenExpired');
     } else {
-      msg += ' — 쿠키와 원래 페이지 정보를 붙여 보냈지만 거부됐습니다. 사이트 보호 설정으로 막힌 것 같습니다.';
+      msg += ' — ' + t('errRejected');
     }
   }
   const text = body.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 100);
-  if (text) msg += ` [서버 응답: ${text}]`;
+  if (text) msg += ` [${t('serverResponse')}: ${text}]`;
   return new Error(msg);
 }
 
@@ -268,17 +273,17 @@ function cancelTask(taskId) {
 // HLS .m3u8 Recursive Parser (runs in offscreen DOM space)
 async function fetchAndParseM3u8Recursively(task, url, depth = 0) {
   if (depth > 5) {
-    throw new Error('M3U8 호출 깊이가 너무 깊습니다.');
+    throw new Error(t('errTooDeep'));
   }
 
   const response = await taskFetch(task, url);
   if (!response.ok) {
-    throw await httpError('재생목록 로드 실패', url, response);
+    throw await httpError(t('playlistLoadFailed'), url, response);
   }
   
   const text = await response.text();
   if (!text.trim().startsWith('#EXTM3U')) {
-    throw new Error('올바른 M3U8 형식의 파일이 아닙니다. 토큰이 만료되었거나 접근이 차단되었을 수 있습니다.');
+    throw new Error(t('errNotM3u8'));
   }
   const lines = text.split('\n');
   const segmentUrls = [];
@@ -300,7 +305,7 @@ async function fetchAndParseM3u8Recursively(task, url, depth = 0) {
       const method = (line.match(/METHOD=([A-Z0-9-]+)/) || [])[1] || '';
       const keyFormat = (line.match(/KEYFORMAT="([^"]+)"/) || [])[1] || 'identity';
       if ((method !== 'NONE' && method !== 'AES-128') || keyFormat !== 'identity') {
-        throw new Error('DRM 보호 영상은 지원하지 않습니다.');
+        throw new Error(t('errDrm'));
       }
       if (line.startsWith('#EXT-X-SESSION-KEY:')) continue;
       if (method === 'AES-128') {
@@ -311,7 +316,7 @@ async function fetchAndParseM3u8Recursively(task, url, depth = 0) {
           // Without the key every segment would fail to decrypt: stop here with the real reason
           const keyRes = await taskFetch(task, keyUrl);
           if (!keyRes.ok) {
-            throw await httpError('암호화 키 로드 실패', keyUrl, keyRes);
+            throw await httpError(t('keyLoadFailed'), keyUrl, keyRes);
           }
           const keyBuffer = await keyRes.arrayBuffer();
           currentKey = await crypto.subtle.importKey('raw', keyBuffer, { name: 'AES-CBC' }, false, ['decrypt']);
@@ -418,7 +423,7 @@ async function runTaskQueue(task) {
         mergeAndSaveTask(task);
       } catch(err) {
         task.state = 'error';
-        task.errorMsg = `병합 실패: ${err.message}`;
+        task.errorMsg = `${t('mergeFailed')}: ${err.message}`;
         broadcastProgress(task);
       }
     }
@@ -437,7 +442,7 @@ async function runTaskQueue(task) {
         mergeAndSaveTask(task);
       } catch(err) {
         task.state = 'error';
-        task.errorMsg = `병합 실패: ${err.message}`;
+        task.errorMsg = `${t('mergeFailed')}: ${err.message}`;
         broadcastProgress(task);
       }
     }
@@ -470,7 +475,7 @@ async function downloadWorker(task) {
         retries--;
         if (retries === 0) {
           task.state = 'error';
-          task.errorMsg = `조각 다운로드 실패 (${nextIdx + 1}/${task.totalSegments}): ${err.message}`;
+          task.errorMsg = `${t('segmentFailed')} (${nextIdx + 1}/${task.totalSegments}): ${err.message}`;
           broadcastProgress(task);
           if (task.abortController) {
             task.abortController.abort();
@@ -599,7 +604,7 @@ async function fetchSegment(task, url, signal, key = null, iv = null) {
       return decrypted;
     } catch (e) {
       console.error("AES Decryption failed for segment:", e);
-      throw new Error("AES 복호화 실패");
+      throw new Error(t('errDecrypt'));
     }
   }
   

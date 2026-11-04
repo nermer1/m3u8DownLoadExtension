@@ -1,0 +1,201 @@
+{
+  "appDesc": {
+    "message": "ページで再生中の HLS (.m3u8)・TS ストリームや MP4・WebM 動画を検出し、画質を選んで1つのファイルに保存します。"
+  },
+  "urlPlaceholder": {
+    "message": "m3u8・ts・mp4 の URL を入力..."
+  },
+  "detectUrl": {
+    "message": "URL を検出"
+  },
+  "detectedStreams": {
+    "message": "検出されたメディア"
+  },
+  "rawToggleTitle": {
+    "message": "動画ごとにまとめず、検出した URL をすべて表示"
+  },
+  "rawToggle": {
+    "message": "すべての URL"
+  },
+  "clearListTitle": {
+    "message": "検出リストをクリア"
+  },
+  "clearList": {
+    "message": "クリア"
+  },
+  "waiting": {
+    "message": "ストリームを待機中..."
+  },
+  "waitingHint": {
+    "message": "動画を再生すると自動で検出します。"
+  },
+  "completed": {
+    "message": "完了"
+  },
+  "noCompleted": {
+    "message": "完了したダウンロードはありません。"
+  },
+  "hide": {
+    "message": "非表示"
+  },
+  "show": {
+    "message": "表示"
+  },
+  "clearAll": {
+    "message": "すべて削除"
+  },
+  "unsupportedSite": {
+    "message": "このサイトには対応していません"
+  },
+  "youtubeNotDetected": {
+    "message": "YouTube の動画は検出・ダウンロードしません。"
+  },
+  "youtubeNotSupported": {
+    "message": "YouTube の動画には対応していません。"
+  },
+  "remove": {
+    "message": "削除"
+  },
+  "confirmCancel": {
+    "message": "ダウンロード中です。キャンセルしますか？"
+  },
+  "preview": {
+    "message": "プレビュー再生"
+  },
+  "rename": {
+    "message": "名前を変更"
+  },
+  "download": {
+    "message": "ダウンロード"
+  },
+  "pause": {
+    "message": "一時停止"
+  },
+  "resume": {
+    "message": "再開"
+  },
+  "cancel": {
+    "message": "キャンセル"
+  },
+  "stateQueued": {
+    "message": "待機中..."
+  },
+  "stateDownloading": {
+    "message": "ダウンロード中..."
+  },
+  "stateParsing": {
+    "message": "プレイリストを解析中..."
+  },
+  "statePaused": {
+    "message": "一時停止中"
+  },
+  "stateMerging": {
+    "message": "結合中..."
+  },
+  "stateSaving": {
+    "message": "保存待ち..."
+  },
+  "stateDone": {
+    "message": "完了"
+  },
+  "stateError": {
+    "message": "エラー"
+  },
+  "speedEta": {
+    "message": "$SPEED$ MB/s (残り $ETA$)",
+    "placeholders": {
+      "speed": {
+        "content": "$1"
+      },
+      "eta": {
+        "content": "$2"
+      }
+    }
+  },
+  "segmentProgress": {
+    "message": "$DONE$ / $TOTAL$ セグメント | $SPEED$",
+    "placeholders": {
+      "done": {
+        "content": "$1"
+      },
+      "total": {
+        "content": "$2"
+      },
+      "speed": {
+        "content": "$3"
+      }
+    }
+  },
+  "invalidUrl": {
+    "message": "有効な HTTP/HTTPS の URL を入力してください。"
+  },
+  "removeFromHistory": {
+    "message": "履歴から削除"
+  },
+  "openFolder": {
+    "message": "フォルダを開く"
+  },
+  "playVideo": {
+    "message": "動画を再生"
+  },
+  "play": {
+    "message": "再生"
+  },
+  "fileMissing": {
+    "message": "ファイルが見つかりません。移動または削除された可能性があります。"
+  },
+  "confirmClearHistory": {
+    "message": "完了したダウンロードの履歴をすべて削除しますか？（ファイル自体は削除されません）"
+  },
+  "downloadFailed": {
+    "message": "ダウンロードに失敗"
+  },
+  "saveError": {
+    "message": "保存エラー"
+  },
+  "downloadStartFailed": {
+    "message": "ダウンロードを開始できません"
+  },
+  "webVideo": {
+    "message": "Web 動画"
+  },
+  "errNoSegments": {
+    "message": "ストリームに有効な動画セグメントがありません。"
+  },
+  "errCloudflare": {
+    "message": "サイトの Cloudflare セキュリティ設定が拡張機能のリクエストをブロックしました。このサイトのダウンロードには対応していません。"
+  },
+  "errTokenExpired": {
+    "message": "URL の認証トークンの有効期限が切れている可能性があります。ページで動画を再生し直した直後にダウンロードしてください。"
+  },
+  "errRejected": {
+    "message": "Cookie と元のページ情報を付けて送信しましたが拒否されました。サイトの保護設定でブロックされているようです。"
+  },
+  "serverResponse": {
+    "message": "サーバーの応答"
+  },
+  "errTooDeep": {
+    "message": "M3U8 の入れ子が深すぎます。"
+  },
+  "playlistLoadFailed": {
+    "message": "プレイリストを読み込めません"
+  },
+  "errNotM3u8": {
+    "message": "有効な M3U8 ファイルではありません。トークンの期限切れ、またはアクセスがブロックされた可能性があります。"
+  },
+  "errDrm": {
+    "message": "DRM で保護された動画には対応していません。"
+  },
+  "keyLoadFailed": {
+    "message": "暗号化キーを読み込めません"
+  },
+  "mergeFailed": {
+    "message": "結合に失敗"
+  },
+  "segmentFailed": {
+    "message": "セグメントのダウンロードに失敗"
+  },
+  "errDecrypt": {
+    "message": "AES の復号に失敗"
+  }
+}

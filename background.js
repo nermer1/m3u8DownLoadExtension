@@ -288,6 +288,15 @@ function clearAllPageHeaderRules() {
     .catch(() => {});
 }
 
+// Error texts offscreen.js shows, in the browser language (offscreen documents have no chrome.i18n)
+const OFFSCREEN_MESSAGE_KEYS = [
+  'errNoSegments', 'errCloudflare', 'errTokenExpired', 'errRejected', 'serverResponse', 'errTooDeep',
+  'playlistLoadFailed', 'errNotM3u8', 'errDrm', 'keyLoadFailed', 'mergeFailed', 'segmentFailed', 'errDecrypt'
+];
+function offscreenMessages() {
+  return Object.fromEntries(OFFSCREEN_MESSAGE_KEYS.map(key => [key, chrome.i18n.getMessage(key)]));
+}
+
 // Create offscreen document helper
 async function createOffscreenDocument() {
   if (await hasOffscreenDocument()) return;
@@ -436,7 +445,8 @@ function handleMessage(message, sendResponse) {
         title,
         type,
         resolution,
-        pageHeaders
+        pageHeaders,
+        messages: offscreenMessages()
       }, () => {
         if (chrome.runtime.lastError) { /* ignore channel close when offscreen is booting */ }
       });
@@ -486,7 +496,7 @@ function handleMessage(message, sendResponse) {
         const errorMsg = chrome.runtime.lastError.message;
         if (task) {
           task.state = 'error';
-          task.errorMsg = `저장 에러: ${errorMsg}`;
+          task.errorMsg = `${chrome.i18n.getMessage('saveError')}: ${errorMsg}`;
           broadcastProgressToPopup(task);
         }
         chrome.runtime.sendMessage({ action: 'DOWNLOAD_FAILED_CLEANUP', taskId: message.taskId, errorMsg }, () => {
@@ -604,7 +614,7 @@ function startFileDownload(taskId, url, title) {
     if (!task) return;
     if (chrome.runtime.lastError || downloadId === undefined) {
       task.state = 'error';
-      task.errorMsg = `다운로드 시작 실패: ${chrome.runtime.lastError ? chrome.runtime.lastError.message : ''}`;
+      task.errorMsg = `${chrome.i18n.getMessage('downloadStartFailed')}: ${chrome.runtime.lastError ? chrome.runtime.lastError.message : ''}`;
       delete activeDownloads[taskId];
       persist();
       broadcastProgressToPopup(task);
@@ -662,7 +672,7 @@ chrome.downloads.onChanged.addListener((delta) => {
       if (delta.error && delta.error.current === 'USER_CANCELED') {
         chrome.runtime.sendMessage({ action: 'DOWNLOAD_CANCELLED', taskId: task.id }, () => void chrome.runtime.lastError);
       } else {
-        broadcastProgressToPopup({ ...task, state: 'error', errorMsg: `다운로드 실패: ${delta.error ? delta.error.current : ''}` });
+        broadcastProgressToPopup({ ...task, state: 'error', errorMsg: `${chrome.i18n.getMessage('downloadFailed')}: ${delta.error ? delta.error.current : ''}` });
       }
     } else if (delta.paused) {
       task.state = delta.paused.current ? 'paused' : 'downloading';
@@ -718,7 +728,7 @@ function saveCompletedTaskToStorage(task, finalFilename) {
     downloadId: task.downloadId,
     title: task.title,
     filename: finalFilename,
-    domain: hostname || '웹 비디오',
+    domain: hostname || chrome.i18n.getMessage('webVideo'),
     time: Date.now()
   };
 
