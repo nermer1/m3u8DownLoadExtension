@@ -126,7 +126,9 @@ chrome.webRequest.onBeforeRequest.addListener(
     try {
       const urlObj = new URL(url);
       const pathname = urlObj.pathname.toLowerCase();
-      const search = urlObj.search.toLowerCase();
+      // A page whose address merely mentions a playlist (e.g. player demos: ?src=....m3u8) is not one
+      const isPage = details.type === 'main_frame' || details.type === 'sub_frame';
+      const search = isPage ? '' : urlObj.search.toLowerCase();
 
       let streamType = null;
       if (pathname.includes('.m3u8') || search.includes('.m3u8') || pathname.includes('/m3u8')) {
